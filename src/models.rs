@@ -1,4 +1,5 @@
-pub struct ModDiscriptor {
+#[derive(Debug)]
+pub struct ModDescriptor {
     pub tags: Vec<String>,
     pub name: String,
     pub path: String,
