@@ -1,7 +1,7 @@
 use crate::models::ModDescriptor;
+use std::fs;
 use std::io::Error;
 use std::path::Path;
-use std::{fs, result};
 
 pub fn parse_mod_file(path: &Path) -> Result<ModDescriptor, Error> {
     let contents: String = fs::read_to_string(path)?;
@@ -22,13 +22,31 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, Error> {
     let mut remote_file_id: Option<String> = None;
     let mut picture: Option<String> = None;
     let mut version: Option<String> = None;
+    let mut tags: Vec<String> = Vec::new();
+
+    let mut in_block: bool = false;
 
     for line in contents.lines() {
-        let result = line.split_once("=");
+        if line.contains('{') {
+            in_block = true;
+            continue;
+        } else if line.contains('}') {
+            in_block = false;
+            continue;
+        }
+
+        if in_block {
+            tags.push(line.trim().trim_matches('"').to_string());
+            continue;
+        }
+
+        let result: Option<(&str, &str)> = line.split_once("=");
+
         let (key, value) = match result {
             Some(key_value) => clean_key_value(key_value),
             None => continue,
         };
+
         match key {
             "name" => name = Some(value.to_string()),
             "path" => path = Some(value.to_string()),
@@ -41,16 +59,14 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, Error> {
     }
 
     let descriptor: ModDescriptor = ModDescriptor {
-        tags: vec!["test".to_string()],
+        tags,
         name: name.unwrap(),
         path: path.unwrap(),
         supported_version: supported_version.unwrap(),
         remote_file_id: remote_file_id.unwrap(),
-        picture: picture,
-        version: version,
+        picture,
+        version,
     };
-
-    dbg!(&descriptor);
 
     Ok(descriptor)
 }
