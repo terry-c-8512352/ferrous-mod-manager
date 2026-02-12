@@ -1,5 +1,5 @@
-use crate::models::ModDescriptor;
 use crate::errors::ModParseError;
+use crate::models::ModDescriptor;
 use std::fs;
 use std::path::Path;
 
@@ -62,11 +62,15 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, ModParseError> 
         tags,
         name: name.ok_or(ModParseError::MissingField("name".into()))?,
         path: path.ok_or(ModParseError::MissingField("path".into()))?,
-        supported_version: supported_version.ok_or(ModParseError::MissingField("supported_version".into()))?,
-        remote_file_id: remote_file_id.ok_or(ModParseError::MissingField("remote_file_id".into()))?,
+        supported_version: supported_version
+            .ok_or(ModParseError::MissingField("supported_version".into()))?,
+        remote_file_id: remote_file_id
+            .ok_or(ModParseError::MissingField("remote_file_id".into()))?,
         picture,
         version,
     };
+
+    dbg!(&descriptor);
 
     Ok(descriptor)
 }
@@ -95,5 +99,27 @@ mod tests {
         let input = "";
         let output = parse_mod_string(input);
         assert!(matches!(output, Err(ModParseError::MissingField(_))))
+    }
+
+    #[test]
+    #[ignore] // requires local Paradox Interactive Game installation to run
+    fn test_real_mod_dir() {
+        let mod_dir = std::env::var("GAME_MOD_DIR")
+            .expect("Set GAME_MOD_DIR env var to run this test");
+        let mod_dir = Path::new(&mod_dir);
+
+        for entry in fs::read_dir(mod_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "mod") {
+                let result = parse_mod_file(&path);
+                assert!(
+                    result.is_ok(),
+                    "Failed to parse {:?}: {:?}",
+                    path,
+                    result.err()
+                );
+            }
+        }
     }
 }
