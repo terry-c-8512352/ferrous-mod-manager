@@ -1,9 +1,9 @@
 use crate::models::ModDescriptor;
+use crate::errors::ModParseError;
 use std::fs;
-use std::io::Error;
 use std::path::Path;
 
-pub fn parse_mod_file(path: &Path) -> Result<ModDescriptor, Error> {
+pub fn parse_mod_file(path: &Path) -> Result<ModDescriptor, ModParseError> {
     let contents: String = fs::read_to_string(path)?;
     parse_mod_string(&contents)
 }
@@ -15,7 +15,7 @@ pub fn clean_key_value<'a>(key_values: (&'a str, &'a str)) -> (&'a str, &'a str)
     return (key, value);
 }
 
-pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, Error> {
+pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, ModParseError> {
     let mut name: Option<String> = None;
     let mut path: Option<String> = None;
     let mut supported_version: Option<String> = None;
@@ -60,10 +60,10 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, Error> {
 
     let descriptor: ModDescriptor = ModDescriptor {
         tags,
-        name: name.unwrap(),
-        path: path.unwrap(),
-        supported_version: supported_version.unwrap(),
-        remote_file_id: remote_file_id.unwrap(),
+        name: name.ok_or(ModParseError::MissingField("name".into()))?,
+        path: path.ok_or(ModParseError::MissingField("path".into()))?,
+        supported_version: supported_version.ok_or(ModParseError::MissingField("supported_version".into()))?,
+        remote_file_id: remote_file_id.ok_or(ModParseError::MissingField("remote_file_id".into()))?,
         picture,
         version,
     };
@@ -80,5 +80,20 @@ mod tests {
         let test_path = Path::new("tests/fixtures/test_mod.mod");
         let output = parse_mod_file(test_path).unwrap();
         assert_eq!(output.name, "My Mod Name");
+    }
+
+    #[test]
+    fn test_no_tags() {
+        let input =
+            "name=\"Test\"\npath=\"/some/path\"\nsupported_version=\"1.0\"\nremote_file_id=\"123\"";
+        let output = parse_mod_string(input).unwrap();
+        assert_eq!(output.tags.len(), 0);
+    }
+
+    #[test]
+    fn test_empty_file() {
+        let input = "";
+        let output = parse_mod_string(input);
+        assert!(matches!(output, Err(ModParseError::MissingField(_))))
     }
 }
