@@ -70,8 +70,6 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, ModParseError> 
         version,
     };
 
-    dbg!(&descriptor);
-
     Ok(descriptor)
 }
 
@@ -108,7 +106,10 @@ mod tests {
             .expect("Set GAME_MOD_DIR env var to run this test");
         let mod_dir = Path::new(&mod_dir);
 
+        let mut idx: i8 = 0;
+
         for entry in fs::read_dir(mod_dir).unwrap() {
+            idx += 1;
             let entry = entry.unwrap();
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "mod") {
@@ -121,5 +122,8 @@ mod tests {
                 );
             }
         }
+
+        dbg!(idx);
+
     }
 }
