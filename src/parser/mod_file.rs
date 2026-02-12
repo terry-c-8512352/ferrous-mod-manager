@@ -68,6 +68,7 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, ModParseError> 
             .ok_or(ModParseError::MissingField("remote_file_id".into()))?,
         picture,
         version,
+        
     };
 
     Ok(descriptor)
