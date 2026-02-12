@@ -1,26 +1,56 @@
 use crate::models::ModDescriptor;
-use std::fs;
 use std::io::Error;
 use std::path::Path;
+use std::{fs, result};
 
 pub fn parse_mod_file(path: &Path) -> Result<ModDescriptor, Error> {
     let contents: String = fs::read_to_string(path)?;
     parse_mod_string(&contents)
 }
 
-pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, Error> {
+pub fn clean_key_value<'a>(key_values: (&'a str, &'a str)) -> (&'a str, &'a str) {
+    let (key, value) = key_values;
+    let key = key.trim().trim_matches('"');
+    let value: &str = value.trim().trim_matches('"');
+    return (key, value);
+}
 
-    dbg!(&contents);
+pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, Error> {
+    let mut name: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut supported_version: Option<String> = None;
+    let mut remote_file_id: Option<String> = None;
+    let mut picture: Option<String> = None;
+    let mut version: Option<String> = None;
+
+    for line in contents.lines() {
+        let result = line.split_once("=");
+        let (key, value) = match result {
+            Some(key_value) => clean_key_value(key_value),
+            None => continue,
+        };
+        match key {
+            "name" => name = Some(value.to_string()),
+            "path" => path = Some(value.to_string()),
+            "supported_version" => supported_version = Some(value.to_string()),
+            "remote_file_id" => remote_file_id = Some(value.to_string()),
+            "picture" => picture = Some(value.to_string()),
+            "version" => version = Some(value.to_string()),
+            _ => {}
+        }
+    }
 
     let descriptor: ModDescriptor = ModDescriptor {
         tags: vec!["test".to_string()],
-        name: String::from("My Mod Name"),
-        path: String::from("example path"),
-        supported_version: String::from("1.1.1"),
-        remote_file_id: String::from("example_id"),
-        picture: None,
-        version: None,
+        name: name.unwrap(),
+        path: path.unwrap(),
+        supported_version: supported_version.unwrap(),
+        remote_file_id: remote_file_id.unwrap(),
+        picture: picture,
+        version: version,
     };
+
+    dbg!(&descriptor);
 
     Ok(descriptor)
 }
