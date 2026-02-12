@@ -8,11 +8,11 @@ pub fn parse_mod_file(path: &Path) -> Result<ModDescriptor, ModParseError> {
     parse_mod_string(&contents)
 }
 
-pub fn clean_key_value<'a>(key_values: (&'a str, &'a str)) -> (&'a str, &'a str) {
+fn clean_key_value<'a>(key_values: (&'a str, &'a str)) -> (&'a str, &'a str) {
     let (key, value) = key_values;
     let key = key.trim().trim_matches('"');
     let value: &str = value.trim().trim_matches('"');
-    return (key, value);
+    (key, value)
 }
 
 pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, ModParseError> {
@@ -24,7 +24,7 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, ModParseError> 
     let mut version: Option<String> = None;
     let mut tags: Vec<String> = Vec::new();
 
-    let mut in_block: bool = false;
+    let mut in_block = false;
 
     for line in contents.lines() {
         if line.contains('{') {
@@ -40,7 +40,7 @@ pub fn parse_mod_string(contents: &str) -> Result<ModDescriptor, ModParseError> 
             continue;
         }
 
-        let result: Option<(&str, &str)> = line.split_once("=");
+        let result = line.split_once("=");
 
         let (key, value) = match result {
             Some(key_value) => clean_key_value(key_value),
@@ -106,10 +106,7 @@ mod tests {
             .expect("Set GAME_MOD_DIR env var to run this test");
         let mod_dir = Path::new(&mod_dir);
 
-        let mut idx: i8 = 0;
-
         for entry in fs::read_dir(mod_dir).unwrap() {
-            idx += 1;
             let entry = entry.unwrap();
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "mod") {
@@ -122,8 +119,6 @@ mod tests {
                 );
             }
         }
-
-        dbg!(idx);
 
     }
 }
