@@ -1,4 +1,6 @@
+use nom::branch::alt;
 use nom::character::complete::multispace0;
+use nom::combinator::map;
 use nom::multi::many0;
 use nom::sequence::preceded;
 use nom::{
@@ -7,6 +9,13 @@ use nom::{
 };
 use std::fs;
 use std::path::Path;
+use std::process::Output;
+
+#[derive(Debug)]
+enum ModValue<'a> {
+    Single(&'a str),
+    List(Vec<&'a str>),
+}
 
 fn parse_key_value(input: &str) -> IResult<&str, (&str, &str)> {
     let output = separated_pair(
@@ -35,11 +44,24 @@ fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
     output
 }
 
+fn parse_mod_file(input: &str) -> IResult<&str, Vec<(&str, ModValue)>> {
+    let output = many0(preceded(
+        multispace0,
+        alt((
+            map(parse_block_value, |(k, v)| (k, ModValue::List(v))),
+            map(parse_key_value, |(k, v)| (k, ModValue::Single(v))),
+        )),
+    ))
+    .parse(input);
+    output
+}
+
 fn read_mod_file_from_disk(path: &Path) {
     let contents: String = fs::read_to_string(path).unwrap();
-    let output = parse_key_value(&contents);
-    output;
+    let output = parse_mod_file(&contents);
+    dbg!(output);
 }
+
 
 #[cfg(test)]
 mod tests {
