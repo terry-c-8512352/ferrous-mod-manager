@@ -1,13 +1,44 @@
+use nom::character::complete::multispace0;
+use nom::multi::many0;
+use nom::sequence::preceded;
 use nom::{
-    IResult,
-    Parser,
-    sequence::delimited,
-    character::complete::char,
-    bytes::complete::is_not,
+    IResult, Parser, bytes::complete::is_not, character::complete::char, sequence::delimited,
+    sequence::separated_pair,
 };
+use std::fs;
+use std::path::Path;
 
-fn parse_quoted_string(input: &str) -> IResult<&str, &str> {
-    delimited(char('"'), is_not("\""), char('"')).parse(input)
+fn parse_key_value(input: &str) -> IResult<&str, (&str, &str)> {
+    let output = separated_pair(
+        is_not("="),
+        char('='),
+        delimited(char('"'), is_not("\""), char('"')),
+    )
+    .parse(input);
+    output
+}
+
+fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
+    let output = separated_pair(
+        is_not("="),
+        char('='),
+        delimited(
+            char('{'),
+            many0(preceded(
+                multispace0,
+                delimited(char('"'), is_not("\""), char('"')),
+            )),
+            preceded(multispace0, char('}')),
+        ),
+    )
+    .parse(input);
+    output
+}
+
+fn read_mod_file_from_disk(path: &Path) {
+    let contents: String = fs::read_to_string(path).unwrap();
+    let output = parse_key_value(&contents);
+    output;
 }
 
 #[cfg(test)]
@@ -15,10 +46,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_quoted_string() {
-        let input = "\"Hello, World!\"";
-        let output = parse_quoted_string(input).unwrap();
-        assert_eq!(output.1, "Hello, World!");
+    fn test_parse_key_value() {
+        let input = r#"name="My Mod Name""#;
+        let (remaining, (key, value)) = parse_key_value(input).unwrap();
+        assert_eq!(key, "name");
+        assert_eq!(value, "My Mod Name");
+        assert_eq!(remaining, "");
+    }
+
+    #[test]
+    fn test_block_parser() {
+        let input = "tags={ \"Galaxy Generation\" \"Gameplay\" }";
+        let parsed_block = parse_block_value(input).unwrap();
+        dbg!(parsed_block);
+    }
+
+    #[test]
+    fn test_mock_mod_file() {
+        let test_path = Path::new("tests/fixtures/test_mod.mod");
+        let output = read_mod_file_from_disk(test_path);
         dbg!(output);
     }
 }
