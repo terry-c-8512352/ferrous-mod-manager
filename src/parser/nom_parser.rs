@@ -18,18 +18,19 @@ pub enum ModValue<'a> {
     List(Vec<&'a str>),
 }
 
+// Parses a key value string i.e intro="Hello, World!" -> (intro, Hello, World!)
 pub fn parse_key_value(input: &str) -> IResult<&str, (&str, &str)> {
-    let output = separated_pair(
+    separated_pair(
         is_not("="),
         char('='),
         delimited(char('"'), is_not("\""), char('"')),
     )
-    .parse(input);
-    output
+    .parse(input)
 }
 
+// Parses a brace delimited tag block i.e tags={ "World", "Other" } -> (tags, [World, Other])
 pub fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
-    let output = separated_pair(
+    separated_pair(
         is_not("="),
         char('='),
         delimited(
@@ -41,17 +42,16 @@ pub fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
             preceded(multispace0, char('}')),
         ),
     )
-    .parse(input);
-    output
+    .parse(input)
 }
 
 pub fn parse_mod_file(input: &str) -> Result<ModDescriptor, ModParseError> {
     let mut mod_descriptor = ModDescriptor {
-        name: "".to_string(),
-        path: "".to_string(),
-        remote_file_id: "".to_string(),
-        supported_version: "".to_string(),
-        tags: vec!["".to_string()],
+        name: None,
+        path: None,
+        remote_file_id: None,
+        supported_version: None,
+        tags: None,
         picture: None,
         version: None
     };
@@ -67,17 +67,24 @@ pub fn parse_mod_file(input: &str) -> Result<ModDescriptor, ModParseError> {
     
     for item in &parsed_file.1 {
         match item {
-            ("name", ModValue::Single(val)) => mod_descriptor.name = val.to_string(),
-            ("path", ModValue::Single(val)) => mod_descriptor.path = val.to_string(),
-            ("remote_file_id", ModValue::Single(val)) => mod_descriptor.remote_file_id = val.to_string(),
-            ("supported_version", ModValue::Single(val)) => mod_descriptor.supported_version = val.to_string(),
+            ("name", ModValue::Single(val)) => mod_descriptor.name = Some(val.to_string()),
+            ("path", ModValue::Single(val)) => mod_descriptor.path = Some(val.to_string()),
+            ("remote_file_id", ModValue::Single(val)) => mod_descriptor.remote_file_id = Some(val.to_string()),
+            ("supported_version", ModValue::Single(val)) => mod_descriptor.supported_version = Some(val.to_string()),
             ("picture", ModValue::Single(val)) => mod_descriptor.picture = Some(val.to_string()),
             ("version", ModValue::Single(val)) => mod_descriptor.version = Some(val.to_string()),
-            ("tags", ModValue::List(list)) => mod_descriptor.tags = list.into_iter().map(|f| f.to_string()).collect(),
+            ("tags", ModValue::List(list)) => mod_descriptor.tags = Some(list.into_iter().map(|f| f.to_string()).collect()),
             _ => {} // TODO: Probs raise an error here? Probably means we have an unexpected field?
             
         }
     }
+
+    // Verify required fields
+    mod_descriptor.name.as_ref().ok_or(ModParseError::MissingField(("name".to_string())))?;
+    mod_descriptor.path.as_ref().ok_or(ModParseError::MissingField(("path".to_string())))?;
+    mod_descriptor.remote_file_id.as_ref().ok_or(ModParseError::MissingField(("remote_file_id".to_string())))?;
+    mod_descriptor.supported_version.as_ref().ok_or(ModParseError::MissingField(("supported_version".to_string())))?;
+
 
     Ok(mod_descriptor)
 }
@@ -104,14 +111,14 @@ mod tests {
     #[test]
     fn test_block_parser() {
         let input = "tags={ \"Galaxy Generation\" \"Gameplay\" }";
-        let parsed_block = parse_block_value(input).unwrap();
-        dbg!(parsed_block);
+        let parsed_block = parse_block_value(input).unwrap().1;
     }
 
     #[test]
-    fn test_mock_mod_file() {
-        let test_path = Path::new("tests/fixtures/test_mod.mod");
-        let output = read_mod_file_from_disk(test_path);
-        dbg!(output);
+    fn test_empty_file() {
+        let input = "";
+        let parsed_file = parse_mod_file(input);
+        assert!(matches!(parsed_file, Err(ModParseError::MissingField(_))))
     }
+
 }
