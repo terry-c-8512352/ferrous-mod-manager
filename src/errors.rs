@@ -10,5 +10,4 @@ pub enum ModParseError {
 
     #[error("Mod descriptor parsing failed: {0}")]
     ParseError(String),
-
 }
