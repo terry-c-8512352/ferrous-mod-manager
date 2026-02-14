@@ -6,5 +6,9 @@ pub enum ModParseError {
     Io(#[from] std::io::Error),
 
     #[error("Missing required field: {0}")]
-    MissingField(String)
+    MissingField(String),
+
+    #[error("Mod descriptor parsing failed: {0}")]
+    ParseError(String),
+
 }

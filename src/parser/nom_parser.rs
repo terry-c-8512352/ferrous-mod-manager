@@ -9,6 +9,7 @@ use nom::{
 };
 use std::fs;
 use std::path::Path;
+use crate::errors::ModParseError;
 use crate::models::ModDescriptor;
 
 #[derive(Debug)]
@@ -44,7 +45,7 @@ pub fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
     output
 }
 
-pub fn parse_mod_file(input: &str) -> ModDescriptor {
+pub fn parse_mod_file(input: &str) -> Result<ModDescriptor, ModParseError> {
     let mut mod_descriptor = ModDescriptor {
         name: "".to_string(),
         path: "".to_string(),
@@ -62,7 +63,7 @@ pub fn parse_mod_file(input: &str) -> ModDescriptor {
             map(parse_key_value, |(k, v)| (k, ModValue::Single(v))),
         )),
     ))
-    .parse(input).unwrap(); // TODO: error better
+    .parse(input).map_err(|op| ModParseError::ParseError(op.to_string()))?;
     
     for item in &parsed_file.1 {
         match item {
@@ -78,7 +79,7 @@ pub fn parse_mod_file(input: &str) -> ModDescriptor {
         }
     }
 
-    mod_descriptor
+    Ok(mod_descriptor)
 }
 
 pub fn read_mod_file_from_disk(path: &Path) {
