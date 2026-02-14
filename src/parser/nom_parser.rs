@@ -9,15 +9,15 @@ use nom::{
 };
 use std::fs;
 use std::path::Path;
-use std::process::Output;
+use crate::models::ModDescriptor;
 
 #[derive(Debug)]
-enum ModValue<'a> {
+pub enum ModValue<'a> {
     Single(&'a str),
     List(Vec<&'a str>),
 }
 
-fn parse_key_value(input: &str) -> IResult<&str, (&str, &str)> {
+pub fn parse_key_value(input: &str) -> IResult<&str, (&str, &str)> {
     let output = separated_pair(
         is_not("="),
         char('='),
@@ -27,7 +27,7 @@ fn parse_key_value(input: &str) -> IResult<&str, (&str, &str)> {
     output
 }
 
-fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
+pub fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
     let output = separated_pair(
         is_not("="),
         char('='),
@@ -44,22 +44,46 @@ fn parse_block_value(input: &str) -> IResult<&str, (&str, Vec<&str>)> {
     output
 }
 
-fn parse_mod_file(input: &str) -> IResult<&str, Vec<(&str, ModValue)>> {
-    let output = many0(preceded(
+pub fn parse_mod_file(input: &str) -> ModDescriptor {
+    let mut mod_descriptor = ModDescriptor {
+        name: "".to_string(),
+        path: "".to_string(),
+        remote_file_id: "".to_string(),
+        supported_version: "".to_string(),
+        tags: vec!["".to_string()],
+        picture: None,
+        version: None
+    };
+
+    let parsed_file = many0(preceded(
         multispace0,
         alt((
             map(parse_block_value, |(k, v)| (k, ModValue::List(v))),
             map(parse_key_value, |(k, v)| (k, ModValue::Single(v))),
         )),
     ))
-    .parse(input);
-    output
+    .parse(input).unwrap(); // TODO: error better
+    
+    for item in &parsed_file.1 {
+        match item {
+            ("name", ModValue::Single(val)) => mod_descriptor.name = val.to_string(),
+            ("path", ModValue::Single(val)) => mod_descriptor.path = val.to_string(),
+            ("remote_file_id", ModValue::Single(val)) => mod_descriptor.remote_file_id = val.to_string(),
+            ("supported_version", ModValue::Single(val)) => mod_descriptor.supported_version = val.to_string(),
+            ("picture", ModValue::Single(val)) => mod_descriptor.picture = Some(val.to_string()),
+            ("version", ModValue::Single(val)) => mod_descriptor.version = Some(val.to_string()),
+            ("tags", ModValue::List(list)) => mod_descriptor.tags = list.into_iter().map(|f| f.to_string()).collect(),
+            _ => {} // TODO: Probs raise an error here? Probably means we have an unexpected field?
+            
+        }
+    }
+
+    mod_descriptor
 }
 
-fn read_mod_file_from_disk(path: &Path) {
+pub fn read_mod_file_from_disk(path: &Path) {
     let contents: String = fs::read_to_string(path).unwrap();
     let output = parse_mod_file(&contents);
-    dbg!(output);
 }
 
 
