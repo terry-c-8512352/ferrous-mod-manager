@@ -8,3 +8,14 @@ pub struct ModDescriptor {
     pub picture: Option<String>,
     pub version: Option<String>,
 }
+
+pub struct LibraryVdf {
+    pub idx: i16,
+    pub path: String,
+    pub apps: Vec<String>
+
+}
+
+pub struct SteamLibraries {
+    pub libraries: Vec<LibraryVdf>
+}
