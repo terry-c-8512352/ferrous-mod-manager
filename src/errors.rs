@@ -17,7 +17,7 @@ pub enum VdfParseError {
     #[error("Missing required field: {0}")]
     MissingField(String),
 
-    #[error("Mod descriptor parsing failed: {0}")]
+    #[error("VDF parsing failed: {0}")]
     ParseError(String),
 
     #[error("Invalid number: {0}")]

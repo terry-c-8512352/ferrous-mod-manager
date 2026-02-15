@@ -5,7 +5,7 @@ use nom::{
     branch::alt,
     bytes::complete::take_while,
     character::complete::{char, multispace0, multispace1},
-    combinator::map,
+    combinator::{map, recognize},
     multi::many0,
     sequence::{delimited, preceded, separated_pair},
 };
@@ -67,7 +67,7 @@ pub fn parse_vdf_block(input: &str) -> Result<LibraryVdf, VdfParseError> {
             }
             VdfEntry::Block("apps", app_list) => {
                 for (app_id, _size) in app_list { // Size of games is not currently used
-                    apps.push(app_id.parse().unwrap());
+                    apps.push(app_id.parse()?);
                 }
             }
             _ => {}
@@ -80,8 +80,47 @@ pub fn parse_vdf_block(input: &str) -> Result<LibraryVdf, VdfParseError> {
     Ok(lib_vdf)
 }
 
+fn parse_raw_block(input: &str) -> IResult<&str, &str> {
+    recognize(separated_pair(
+        parse_quoted_string,
+        multispace1,
+        delimited(
+            char('{'),
+            many0(preceded(
+                multispace0,
+                alt((
+                    recognize(parse_apps_block),
+                    recognize(parse_tabbed_kv_pair),
+                )),
+            )),
+            preceded(multispace0, char('}')),
+        ),
+    ))
+    .parse(input)
+}
+
+pub fn parse_vdf_file(input: &str) -> Result<Vec<LibraryVdf>, VdfParseError> {
+    let (_, (_, raw_blocks)) = separated_pair(
+        parse_quoted_string,
+        multispace1,
+        delimited(
+            char('{'),
+            many0(preceded(multispace0, parse_raw_block)),
+            preceded(multispace0, char('}')),
+        ),
+    )
+    .parse(input)
+    .map_err(|e| VdfParseError::ParseError(e.to_string()))?;
+
+    raw_blocks.into_iter().map(parse_vdf_block).collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use nom::lib;
+
     use super::*;
 
     #[test]
@@ -136,5 +175,21 @@ mod tests {
         assert_eq!(lib_vdf.apps[1], 12345);
         assert_eq!(lib_vdf.idx, 0);
         assert_eq!(lib_vdf.path, "/home/user/.local/share/Steam");
+    }
+
+    #[test]
+    fn test_vdf_file() {
+        let input = fs::read_to_string("tests/fixtures/test.vdf").unwrap();
+        let libraries = parse_vdf_file(&input).unwrap();
+
+        assert_eq!(libraries.len(), 2);
+
+        assert_eq!(libraries[0].idx, 0);
+        assert_eq!(libraries[0].path, "/home/user/.local/share/Steam");
+        assert_eq!(libraries[0].apps, vec![1, 2, 3, 4, 5, 6]);
+
+        assert_eq!(libraries[1].idx, 1);
+        assert_eq!(libraries[1].path, "/run/media/user/drive/alt_steam_loc");
+        assert_eq!(libraries[1].apps, vec![7, 8, 9, 10, 11, 12]);
     }
 }

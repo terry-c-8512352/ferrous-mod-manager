@@ -1,0 +1,39 @@
+"libraryfolders"
+{
+        "0"
+        {
+                "path"          "/home/user/.local/share/Steam"
+                "label"         ""
+                "contentid"             "12345"
+                "totalsize"             "0"
+                "update_clean_bytes_tally"              "123"
+                "time_last_update_verified"             "123"
+                "apps"
+                {
+                        "1"           "123456789"
+                        "2"           "123456789"
+                        "3"           "123456789"
+                        "4"           "123456789"
+                        "5"           "123456789"
+                        "6"           "123456789"
+                }
+        }
+        "1"
+        {
+                "path"          "/run/media/user/drive/alt_steam_loc"
+                "label"         ""
+                "contentid"             "12345"
+                "totalsize"             "9"
+                "update_clean_bytes_tally"              "123"
+                "time_last_update_verified"             "123"
+                "apps"
+                {
+                        "7"                "123456789"
+                        "8"                "123456789"
+                        "9"                "123456789"
+                        "10"               "123456789"
+                        "11"               "123456789"
+                        "12"               "123456789"
+                }
+        }
+}
