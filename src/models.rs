@@ -10,12 +10,7 @@ pub struct ModDescriptor {
 }
 
 pub struct LibraryVdf {
-    pub idx: i16,
+    pub idx: u32,
     pub path: String,
-    pub apps: Vec<String>
-
-}
-
-pub struct SteamLibraries {
-    pub libraries: Vec<LibraryVdf>
+    pub apps: Vec<u32>
 }
