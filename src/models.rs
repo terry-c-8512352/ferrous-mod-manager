@@ -12,5 +12,5 @@ pub struct ModDescriptor {
 pub struct LibraryVdf {
     pub idx: u32,
     pub path: String,
-    pub apps: Vec<u32>
+    pub apps: Vec<u32>,
 }

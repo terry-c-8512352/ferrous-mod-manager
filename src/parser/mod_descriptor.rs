@@ -110,7 +110,6 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-
     #[test]
     fn test_parse_key_value() {
         let input = r#"name="My Mod Name""#;
@@ -141,16 +140,25 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_mod_file () {
+    fn test_mock_mod_file() {
         let path = Path::new("./tests/fixtures/test_mod.mod");
         let file_contents = fs::read_to_string(path).unwrap();
         let parsed_file = parse_mod_file(&file_contents).unwrap();
         assert_eq!(parsed_file.name.unwrap(), "My Mod Name".to_string());
-        assert_eq!(parsed_file.path.unwrap(), "/home/user/.local/share/Steam/steamapps/workshop/content/281990/12345".to_string());
+        assert_eq!(
+            parsed_file.path.unwrap(),
+            "/home/user/.local/share/Steam/steamapps/workshop/content/281990/12345".to_string()
+        );
         assert_eq!(parsed_file.remote_file_id.unwrap(), "12345".to_string());
         assert_eq!(parsed_file.picture.unwrap(), "thumbnail.png".to_string());
         assert_eq!(parsed_file.supported_version.unwrap(), "v4.2.*".to_string());
-        assert_eq!(parsed_file.tags.as_ref().unwrap().first().unwrap(), "Galaxy Generation");
-        assert_eq!(parsed_file.tags.as_ref().unwrap().last().unwrap(), "Gameplay");
+        assert_eq!(
+            parsed_file.tags.as_ref().unwrap().first().unwrap(),
+            "Galaxy Generation"
+        );
+        assert_eq!(
+            parsed_file.tags.as_ref().unwrap().last().unwrap(),
+            "Gameplay"
+        );
     }
 }

@@ -1,14 +1,21 @@
 use nom::{
     IResult, Parser,
     branch::alt,
-    bytes::complete::is_not,
+    bytes::complete::{is_not, take_while},
     character::complete::{char, multispace0, multispace1},
+    combinator::map,
     multi::many0,
     sequence::{delimited, preceded, separated_pair},
 };
 
+#[derive(Debug)]
+pub enum VdfEntry<'a> {
+    KeyValue(&'a str, &'a str),
+    Block(&'a str, Vec<(&'a str, &'a str)>),
+}
+
 pub fn parse_quoted_string(input: &str) -> IResult<&str, &str> {
-    delimited(char('"'), is_not("\""), char('"')).parse(input)
+    delimited(char('"'), take_while(|c| c != '"'), char('"')).parse(input)
 }
 
 pub fn parse_tabbed_kv_pair(input: &str) -> IResult<&str, (&str, &str)> {
@@ -28,11 +35,29 @@ pub fn parse_apps_block(input: &str) -> IResult<&str, (&str, Vec<(&str, &str)>)>
     .parse(input)
 }
 
+pub fn parse_vdf_block(input: &str) -> IResult<&str, (&str, Vec<VdfEntry<'_>>)> {
+    separated_pair(
+        parse_quoted_string,
+        multispace1,
+        delimited(
+            char('{'),
+            many0(preceded(
+                multispace0,
+                alt((
+                    map(parse_apps_block, |(k, v)| VdfEntry::Block(k, v)),
+                    map(parse_tabbed_kv_pair, |(k, v)| VdfEntry::KeyValue(k, v)),
+                )),
+            )),
+            preceded(multispace0, char('}')),
+        ),
+    )
+    .parse(input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::Path;
 
     #[test]
     fn test_parsed_quoted_string() {
@@ -71,19 +96,14 @@ mod tests {
             "path"		"/home/user/.local/share/Steam"
             "label"		""
             "contentid"		"26525186198543"
-            ...
             "apps"
             {
                 "123"		"1234567345"
 			    "12345"		"12345454534"
             }
         }"#;
-    }
 
-    #[test]
-    fn test_parse_vdf() {
-        let contents =
-            fs::read_to_string("/home/tyrcho/.steam/steam/steamapps/libraryfolders.vdf").unwrap();
-        dbg!(contents);
+        let ouput = parse_vdf_block(input).unwrap();
+        dbg!(ouput);
     }
 }
