@@ -9,6 +9,7 @@ pub struct ModDescriptor {
     pub version: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct LibraryVdf {
     pub idx: u32,
     pub path: String,

@@ -1,7 +1,9 @@
+use crate::models::LibraryVdf;
+use crate::errors::VdfParseError;
 use nom::{
     IResult, Parser,
     branch::alt,
-    bytes::complete::{is_not, take_while},
+    bytes::complete::take_while,
     character::complete::{char, multispace0, multispace1},
     combinator::map,
     multi::many0,
@@ -35,8 +37,8 @@ pub fn parse_apps_block(input: &str) -> IResult<&str, (&str, Vec<(&str, &str)>)>
     .parse(input)
 }
 
-pub fn parse_vdf_block(input: &str) -> IResult<&str, (&str, Vec<VdfEntry<'_>>)> {
-    separated_pair(
+pub fn parse_vdf_block(input: &str) -> Result<LibraryVdf, VdfParseError> {
+    let (_, (vdf_idx, entries)) = separated_pair(
         parse_quoted_string,
         multispace1,
         delimited(
@@ -51,13 +53,42 @@ pub fn parse_vdf_block(input: &str) -> IResult<&str, (&str, Vec<VdfEntry<'_>>)> 
             preceded(multispace0, char('}')),
         ),
     )
-    .parse(input)
+    .parse(input).map_err(|e| VdfParseError::ParseError(e.to_string()))?;
+
+    let mut path: Option<String> = None;
+    let mut apps: Vec<u32> = vec![];
+    let mut idx: u32;
+
+    idx = vdf_idx.parse::<u32>()?; // TODO: Error better
+    
+    for entry in entries {
+        match entry {
+            VdfEntry::KeyValue("path",  value) => {
+                path = Some(value.to_string());
+            }
+            VdfEntry::Block("apps", app_list ) => {
+                for (app_id, size) in app_list {
+                    apps.push(app_id.parse().unwrap());
+                }
+            }
+            _ => {}
+        }
+    };
+
+    let path = path.ok_or(VdfParseError::MissingField("path".to_string()))?; 
+
+    let lib_vdf = LibraryVdf {
+        idx,
+        path,
+        apps
+    };
+    Ok(lib_vdf)
+
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
     fn test_parsed_quoted_string() {
@@ -85,8 +116,11 @@ mod tests {
 		}"#;
 
         let (remaining, result) = parse_apps_block(input).unwrap();
-        dbg!(remaining);
-        dbg!(result);
+        assert_eq!(remaining, "");
+        assert_eq!(result.0, "apps");
+        assert_eq!(result.1.len(), 2);
+        assert_eq!(result.1[0], ("123", "1234567345"));
+        assert_eq!(result.1[1], ("12345", "12345454534"));
     }
 
     #[test]
@@ -103,7 +137,11 @@ mod tests {
             }
         }"#;
 
-        let ouput = parse_vdf_block(input).unwrap();
-        dbg!(ouput);
+        let lib_vdf = parse_vdf_block(input).unwrap();
+        assert_eq!(lib_vdf.apps[0], 123);
+        assert_eq!(lib_vdf.apps[1], 12345);
+        assert_eq!(lib_vdf.idx, 0);
+        assert_eq!(lib_vdf.path, "/home/user/.local/share/Steam");
+
     }
 }
