@@ -1,5 +1,5 @@
-use crate::models::LibraryVdf;
 use crate::errors::VdfParseError;
+use crate::models::LibraryVdf;
 use nom::{
     IResult, Parser,
     branch::alt,
@@ -53,37 +53,31 @@ pub fn parse_vdf_block(input: &str) -> Result<LibraryVdf, VdfParseError> {
             preceded(multispace0, char('}')),
         ),
     )
-    .parse(input).map_err(|e| VdfParseError::ParseError(e.to_string()))?;
+    .parse(input)
+    .map_err(|e| VdfParseError::ParseError(e.to_string()))?;
 
     let mut path: Option<String> = None;
     let mut apps: Vec<u32> = vec![];
-    let mut idx: u32;
+    let idx = vdf_idx.parse::<u32>()?; // TODO: Error better
 
-    idx = vdf_idx.parse::<u32>()?; // TODO: Error better
-    
     for entry in entries {
         match entry {
-            VdfEntry::KeyValue("path",  value) => {
+            VdfEntry::KeyValue("path", value) => {
                 path = Some(value.to_string());
             }
-            VdfEntry::Block("apps", app_list ) => {
-                for (app_id, size) in app_list {
+            VdfEntry::Block("apps", app_list) => {
+                for (app_id, _size) in app_list { // Size of games is not currently used
                     apps.push(app_id.parse().unwrap());
                 }
             }
             _ => {}
         }
-    };
+    }
 
-    let path = path.ok_or(VdfParseError::MissingField("path".to_string()))?; 
+    let path = path.ok_or(VdfParseError::MissingField("path".to_string()))?;
 
-    let lib_vdf = LibraryVdf {
-        idx,
-        path,
-        apps
-    };
+    let lib_vdf = LibraryVdf { idx, path, apps };
     Ok(lib_vdf)
-
 }
 
 #[cfg(test)]
@@ -142,6 +136,5 @@ mod tests {
         assert_eq!(lib_vdf.apps[1], 12345);
         assert_eq!(lib_vdf.idx, 0);
         assert_eq!(lib_vdf.path, "/home/user/.local/share/Steam");
-
     }
 }
