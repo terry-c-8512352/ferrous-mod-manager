@@ -93,10 +93,6 @@ pub fn parse_mod_file(input: &str) -> Result<ModDescriptor, ModParseError> {
         .as_ref()
         .ok_or(ModParseError::MissingField("path".to_string()))?;
     mod_descriptor
-        .remote_file_id
-        .as_ref()
-        .ok_or(ModParseError::MissingField("remote_file_id".to_string()))?;
-    mod_descriptor
         .supported_version
         .as_ref()
         .ok_or(ModParseError::MissingField("supported_version".to_string()))?;

@@ -118,9 +118,6 @@ pub fn parse_vdf_file(input: &str) -> Result<Vec<LibraryVdf>, VdfParseError> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-
-    use nom::lib;
-
     use super::*;
 
     #[test]

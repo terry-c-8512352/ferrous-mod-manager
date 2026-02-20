@@ -15,3 +15,11 @@ pub struct LibraryVdf {
     pub path: String,
     pub apps: Vec<u32>,
 }
+
+#[derive(Debug)]
+pub struct DetectedGame {
+    pub app_id: u32,
+    pub install_path: String,
+    pub game_name: String,
+    pub paradox_data_path: String,
+}

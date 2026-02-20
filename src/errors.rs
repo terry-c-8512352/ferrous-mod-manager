@@ -13,6 +13,18 @@ pub enum ModParseError {
 }
 
 #[derive(Error, Debug)]
+pub enum DetectionError {
+    #[error("Could not find home directory")]
+    NoHomeDir,
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("VDF parse error: {0}")]
+    VdfParse(#[from] VdfParseError),
+}
+
+#[derive(Error, Debug)]
 pub enum VdfParseError {
     #[error("Missing required field: {0}")]
     MissingField(String),
