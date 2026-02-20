@@ -66,7 +66,8 @@ pub fn parse_vdf_block(input: &str) -> Result<LibraryVdf, VdfParseError> {
                 path = Some(value.to_string());
             }
             VdfEntry::Block("apps", app_list) => {
-                for (app_id, _size) in app_list { // Size of games is not currently used
+                for (app_id, _size) in app_list {
+                    // Size of games is not currently used
                     apps.push(app_id.parse()?);
                 }
             }
@@ -88,10 +89,7 @@ fn parse_raw_block(input: &str) -> IResult<&str, &str> {
             char('{'),
             many0(preceded(
                 multispace0,
-                alt((
-                    recognize(parse_apps_block),
-                    recognize(parse_tabbed_kv_pair),
-                )),
+                alt((recognize(parse_apps_block), recognize(parse_tabbed_kv_pair))),
             )),
             preceded(multispace0, char('}')),
         ),
@@ -117,8 +115,8 @@ pub fn parse_vdf_file(input: &str) -> Result<Vec<LibraryVdf>, VdfParseError> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use super::*;
+    use std::fs;
 
     #[test]
     fn test_parsed_quoted_string() {

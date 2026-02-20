@@ -15,11 +15,35 @@ fn detect_games_from_home(home: &Path) -> Result<Vec<DetectedGame>, DetectionErr
     // (game_name, steam_folder, paradox_folder)
     let game_info: HashMap<u32, (&str, &str, &str)> = HashMap::from([
         (281990, ("Stellaris", "Stellaris", "Stellaris")),
-        (236850, ("Europa Universalis IV", "Europa Universalis IV", "Europa Universalis IV")),
-        (394360, ("Hearts of Iron IV", "Hearts of Iron IV", "Hearts of Iron IV")),
-        (1158310, ("Crusader Kings III", "Crusader Kings III", "Crusader Kings III")),
+        (
+            236850,
+            (
+                "Europa Universalis IV",
+                "Europa Universalis IV",
+                "Europa Universalis IV",
+            ),
+        ),
+        (
+            394360,
+            (
+                "Hearts of Iron IV",
+                "Hearts of Iron IV",
+                "Hearts of Iron IV",
+            ),
+        ),
+        (
+            1158310,
+            (
+                "Crusader Kings III",
+                "Crusader Kings III",
+                "Crusader Kings III",
+            ),
+        ),
         (529340, ("Victoria 3", "Victoria 3", "Victoria 3")),
-        (859580, ("Imperator: Rome", "Imperator Rome", "Imperator Rome")),
+        (
+            859580,
+            ("Imperator: Rome", "Imperator Rome", "Imperator Rome"),
+        ),
     ]);
 
     let vdf_path = home
@@ -118,8 +142,14 @@ mod tests {
         let stellaris = games.iter().find(|g| g.game_name == "Stellaris").unwrap();
 
         assert_eq!(stellaris.app_id, 281990);
-        assert_eq!(stellaris.install_path, "/fake/steam/library/steamapps/common/Stellaris");
-        assert_eq!(stellaris.paradox_data_path, "tests/fixtures/fake_home/.local/share/Paradox Interactive/Stellaris");
+        assert_eq!(
+            stellaris.install_path,
+            "/fake/steam/library/steamapps/common/Stellaris"
+        );
+        assert_eq!(
+            stellaris.paradox_data_path,
+            "tests/fixtures/fake_home/.local/share/Paradox Interactive/Stellaris"
+        );
     }
 
     fn make_game(paradox_data_path: &str) -> DetectedGame {
@@ -152,7 +182,10 @@ mod tests {
         // it should be silently skipped, not cause a panic or error
         let game = make_game("tests/fixtures/discover");
         let mods = discover_mods(&game);
-        assert!(mods.iter().all(|m| m.name.as_deref() != Some("Incomplete Mod")));
+        assert!(
+            mods.iter()
+                .all(|m| m.name.as_deref() != Some("Incomplete Mod"))
+        );
     }
 
     #[test]
