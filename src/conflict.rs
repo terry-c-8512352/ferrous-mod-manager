@@ -1,4 +1,4 @@
-use crate::models::ModDescriptor;
+use crate::models::{ModConflict, ModDescriptor};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use walkdir::WalkDir;
@@ -25,6 +25,23 @@ pub fn scan_mods(mod_list: Vec<ModDescriptor>) -> HashMap<PathBuf, Vec<String>> 
     }
 
     file_map
+}
+
+pub fn conflict_detection(file_map: HashMap<PathBuf, Vec<String>>) -> Vec<ModConflict> {
+    let mut list_of_conflicts: Vec<ModConflict> = Vec::new();
+
+    for (file_path, mod_list) in file_map {
+        if mod_list.len() > 1 {
+            list_of_conflicts.push(ModConflict {
+                file_path,
+                mod_list,
+            });
+        }
+    }
+
+    dbg!(&list_of_conflicts);
+
+    list_of_conflicts
 }
 
 #[cfg(test)]
@@ -76,5 +93,39 @@ mod tests {
             1,
             "my_event.txt should only be in mod_b"
         );
+    }
+
+    #[test]
+    fn test_conflict_detection_finds_conflicts() {
+        let mut file_map: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        file_map.insert(
+            PathBuf::from("common/traits/foo.txt"),
+            vec!["mod_a".to_string(), "mod_b".to_string()],
+        );
+        file_map.insert(
+            PathBuf::from("events/unique.txt"),
+            vec!["mod_a".to_string()],
+        );
+
+        let conflicts = conflict_detection(file_map);
+
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(
+            conflicts[0].file_path,
+            PathBuf::from("common/traits/foo.txt")
+        );
+        assert!(conflicts[0].mod_list.contains(&"mod_a".to_string()));
+        assert!(conflicts[0].mod_list.contains(&"mod_b".to_string()));
+    }
+
+    #[test]
+    fn test_conflict_detection_no_conflicts() {
+        let mut file_map: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        file_map.insert(PathBuf::from("events/a.txt"), vec!["mod_a".to_string()]);
+        file_map.insert(PathBuf::from("events/b.txt"), vec!["mod_b".to_string()]);
+
+        let conflicts = conflict_detection(file_map);
+
+        assert!(conflicts.is_empty());
     }
 }

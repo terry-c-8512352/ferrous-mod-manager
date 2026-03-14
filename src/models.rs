@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(Debug)]
 pub struct ModDescriptor {
     pub name: Option<String>,              //Required
@@ -22,4 +24,10 @@ pub struct DetectedGame {
     pub install_path: String,
     pub game_name: String,
     pub paradox_data_path: String,
+}
+
+#[derive(Debug)]
+pub struct ModConflict {
+    pub file_path: PathBuf,
+    pub mod_list: Vec<String>,
 }
