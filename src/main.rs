@@ -1,3 +1,4 @@
+use ferrous_mod_manager::conflict;
 use ferrous_mod_manager::detector;
 
 fn main() {
@@ -16,6 +17,15 @@ fn main() {
                 println!("  Mods: {}", mods.len());
                 for m in &mods {
                     println!("    - {}", m.name.as_deref().unwrap_or("(unnamed)"));
+                }
+
+                let mod_conflicts = conflict::conflict_detection(mods);
+
+                for m_conflict in mod_conflicts {
+                    println!("Game File {}", m_conflict.file_path.display());
+                    for mod_name in m_conflict.mod_list {
+                        println!("// Mods affecting file {}", mod_name)
+                    }
                 }
             }
         }
