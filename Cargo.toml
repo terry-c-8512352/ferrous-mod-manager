@@ -1,0 +1,17 @@
+[workspace]
+members = [".", "src-tauri"]
+
+[package]
+name = "ferrous-mod-manager"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nom = "8.0.0"
+thiserror = "2.0.18"
+dirs = "5"
+walkdir = "2.5.0"
+serde = { version = "1.0.228", features = ["derive"] }
+log = "0.4.29"
+serde_json = "1.0.149"
+uuid = { version = "1.22.0", features = ["v4", "serde"] }

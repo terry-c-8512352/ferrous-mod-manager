@@ -1,0 +1,1 @@
+namespace = mod_b_events

@@ -1,0 +1,46 @@
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ModParseError {
+    #[error("IO Error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Missing required field: {0}")]
+    MissingField(String),
+
+    #[error("Mod descriptor parsing failed: {0}")]
+    ParseError(String),
+}
+
+#[derive(Error, Debug)]
+pub enum DetectionError {
+    #[error("Could not find home directory")]
+    NoHomeDir,
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("VDF parse error: {0}")]
+    VdfParse(#[from] VdfParseError),
+}
+
+#[derive(Error, Debug)]
+pub enum VdfParseError {
+    #[error("Missing required field: {0}")]
+    MissingField(String),
+
+    #[error("VDF parsing failed: {0}")]
+    ParseError(String),
+
+    #[error("Invalid number: {0}")]
+    InvalidNumber(#[from] std::num::ParseIntError),
+}
+
+#[derive(Error, Debug)]
+pub enum FileOperationError {
+    #[error("Failed to save file {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("JSON Error: {0}")]
+    SerialisationError(#[from] serde_json::Error),
+}
