@@ -16,7 +16,9 @@ A native Linux mod manager for Paradox Interactive games, built with Rust and Ta
 
 ## Screenshots
 
-*Coming soon*
+<img src="docs/screenshots/mod_collection_overview.png" alt="Mod collection overview" width="700">
+
+<img src="docs/screenshots/mod_conflict_tooltip.png" alt="Mod conflict tooltip" width="700">
 
 ## Installation
 
