@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "src-tauri"]
+members = [".", "src-tauri", "spike-iced"]
 
 [package]
 name = "ferrous-mod-manager"
