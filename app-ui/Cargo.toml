@@ -1,0 +1,10 @@
+# Native Iced desktop UI for Ferrous Mod Manager (replaces the Svelte + Tauri shell).
+[package]
+name = "app-ui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ferrous-mod-manager = { path = ".." }
+iced = { version = "0.13", features = ["svg"] }

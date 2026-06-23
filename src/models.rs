@@ -59,7 +59,7 @@ impl ConflictCategory {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModDescriptor {
     pub name: Option<String>,              //Required
     pub path: Option<String>,              //Required

@@ -151,6 +151,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "app-ui"
+version = "0.1.0"
+dependencies = [
+ "ferrous-mod-manager",
+ "iced",
+]
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5457,14 +5465,6 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
-]
-
-[[package]]
-name = "spike-iced"
-version = "0.0.0"
-dependencies = [
- "ferrous-mod-manager",
- "iced",
 ]
 
 [[package]]
