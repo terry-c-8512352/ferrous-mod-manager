@@ -5,7 +5,7 @@ use std::fs::{read_to_string, write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ConflictCategory {
     Defines,
     GameData,
@@ -15,6 +15,48 @@ pub enum ConflictCategory {
     Map,
     Sound,
     Other,
+}
+
+impl ConflictCategory {
+    /// Bucket a mod-relative file path into a category based on its top-level
+    /// Paradox directory (e.g. `common/defines/...` -> `Defines`). Unrecognised
+    /// paths fall through to `Other`.
+    pub fn from_path(file_path: &Path) -> ConflictCategory {
+        match file_path
+            .components()
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+        {
+            Some("common") => {
+                match file_path
+                    .components()
+                    .nth(1)
+                    .and_then(|c| c.as_os_str().to_str())
+                {
+                    Some("defines") => ConflictCategory::Defines,
+                    _ => ConflictCategory::GameData,
+                }
+            }
+            Some("localisation" | "localization") => ConflictCategory::Localisation,
+            Some("events") => ConflictCategory::Events,
+            Some("gfx" | "interface" | "fonts" | "dlc_metadata") => ConflictCategory::Gfx,
+            Some("sound" | "music") => ConflictCategory::Sound,
+            Some("map" | "map_data") => ConflictCategory::Map,
+            _ => ConflictCategory::Other,
+        }
+    }
+
+    /// Whether a file in this category leaves the gameplay checksum untouched.
+    /// Paradox games keep achievements (and ironman saves) enabled only when
+    /// every active mod touches purely cosmetic content: graphics, sound, and
+    /// localisation text. Everything else — game data, defines, events, the map,
+    /// and unrecognised paths — changes the checksum and disables achievements.
+    pub fn is_achievement_safe(&self) -> bool {
+        matches!(
+            self,
+            ConflictCategory::Localisation | ConflictCategory::Gfx | ConflictCategory::Sound
+        )
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,6 +100,17 @@ pub struct ModConflict {
     pub file_path: PathBuf,
     pub mod_list: Vec<String>,
     pub category: ConflictCategory,
+}
+
+/// Whether a single mod keeps achievements (and ironman saves) enabled.
+/// `gameplay_categories` lists the distinct checksum-affecting categories the
+/// mod touches, so the UI can explain *why* achievements would be disabled; it
+/// is empty when the mod is `compatible`.
+#[derive(Debug, Serialize)]
+pub struct AchievementStatus {
+    pub mod_id: String,
+    pub compatible: bool,
+    pub gameplay_categories: Vec<ConflictCategory>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

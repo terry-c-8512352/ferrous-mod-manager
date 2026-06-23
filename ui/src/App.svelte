@@ -14,6 +14,7 @@
         ModDescriptor,
         ResolvedMod,
         ConflictSeverity,
+        AchievementStatus,
     } from "./lib/types";
     import { resolveModId, conflictSeverityForFile } from "./lib/types";
     import { invoke } from "@tauri-apps/api/core";
@@ -93,6 +94,34 @@
                 console.error(`Unable to detect conflicts: ${err}`),
             );
     });
+    // Achievement / ironman compatibility per installed mod (recomputed when the
+    // game's mod set changes). Keyed by mod_id to match the rest of the UI.
+    let achievementStatuses = $state<AchievementStatus[]>([]);
+    $effect(() => {
+        if (installedMods.length === 0) {
+            achievementStatuses = [];
+            return;
+        }
+        invoke<AchievementStatus[]>("detect_achievement_compatibility", {
+            mods: installedMods,
+        })
+            .then((result) => (achievementStatuses = result))
+            .catch((err) =>
+                console.error(`Unable to detect achievement status: ${err}`),
+            );
+    });
+    const achievementByModId = $derived(
+        new Map(achievementStatuses.map((s) => [s.mod_id, s])),
+    );
+    // How many of the collection's *enabled* mods disable achievements/ironman.
+    const achievementBlockers = $derived(
+        (activeCollection?.mods ?? []).filter(
+            (m) =>
+                m.enabled &&
+                achievementByModId.get(m.mod_id)?.compatible === false,
+        ).length,
+    );
+
     const enabledCount = $derived(
         (activeCollection?.mods ?? []).filter((m) => m.enabled).length,
     );
@@ -219,10 +248,10 @@
         );
     }
 
-    function deleteCollection(name?: string) {
+    function deleteCollection(name: string = selectedCollectionName) {
         const cols = collectionsByGame[selectedGameId];
         if (!cols || cols.length <= 1) return;
-        const target = name ?? selectedCollectionName;
+        const target = name;
         const idx = cols.findIndex((c) => c.name === target);
         if (idx === -1) return;
         const col = cols[idx];
@@ -361,6 +390,7 @@
             <ModList
                 mods={installedMods}
                 {collectionModIdSet}
+                {achievementByModId}
                 ontogglecollection={toggleModInCollection}
                 onaddall={addAllMods}
                 onremoveall={removeAllMods}
@@ -371,6 +401,7 @@
                     {collections}
                     {resolvedModMap}
                     {conflicts}
+                    {achievementByModId}
                     ontoggle={toggleModEnabled}
                     onmove={moveMod}
                     onremove={removeMod}
@@ -390,6 +421,7 @@
             enabledMods={enabledCount}
             significantConflicts={conflictCounts().significant}
             minorConflicts={conflictCounts().minor}
+            {achievementBlockers}
             {activeGameName}
         />
     {/if}

@@ -6,7 +6,7 @@ use ferrous_mod_manager::{
         save_collection_for_game,
     },
     locations::game_data_dir,
-    models::{DetectedGame, ModCollection, ModConflict, ModDescriptor},
+    models::{AchievementStatus, DetectedGame, ModCollection, ModConflict, ModDescriptor},
 };
 use tauri::Manager;
 
@@ -21,6 +21,7 @@ pub fn run() {
             delete_collection,
             create_collection,
             detect_mod_conflict,
+            detect_achievement_compatibility,
             apply_mod_collection
         ])
         .setup(|app| {
@@ -80,6 +81,11 @@ fn delete_collection(game: DetectedGame, mod_collection: ModCollection) -> Resul
 #[tauri::command]
 fn detect_mod_conflict(mods: Vec<ModDescriptor>) -> Vec<ModConflict> {
     ferrous_mod_manager::conflict::conflict_detection(mods)
+}
+
+#[tauri::command]
+fn detect_achievement_compatibility(mods: Vec<ModDescriptor>) -> Vec<AchievementStatus> {
+    ferrous_mod_manager::achievements::achievement_status_for_mods(&mods)
 }
 
 #[tauri::command]

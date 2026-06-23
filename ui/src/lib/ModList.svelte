@@ -1,10 +1,12 @@
 <script lang="ts">
-    import type { ResolvedMod } from "./types";
+    import type { ResolvedMod, AchievementStatus } from "./types";
+    import { achievementSummary } from "./types";
     import ModRow from "./ModRow.svelte";
 
     interface Props {
         mods: ResolvedMod[];
         collectionModIdSet: Set<string>;
+        achievementByModId: Map<string, AchievementStatus>;
         ontogglecollection: (modId: string) => void;
         onaddall: () => void;
         onremoveall: () => void;
@@ -13,6 +15,7 @@
     let {
         mods,
         collectionModIdSet,
+        achievementByModId,
         ontogglecollection,
         onaddall,
         onremoveall,
@@ -66,6 +69,8 @@
                 {mod}
                 enabled={collectionModIdSet.has(mod.mod_id)}
                 variant="installed"
+                achievementCompatible={achievementByModId.get(mod.mod_id)?.compatible ?? true}
+                achievementLabel={achievementSummary(achievementByModId.get(mod.mod_id))}
                 inCollection={collectionModIdSet.has(mod.mod_id)}
                 ontoggle={() => ontogglecollection(mod.mod_id)}
             />

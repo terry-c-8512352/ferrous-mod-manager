@@ -20,5 +20,6 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Claude Code
-CLAUDE.md
+# Generated mock $HOME for testing without Steam/Paradox installed
+# (see examples/gen_mock_home.rs)
+mock-home/

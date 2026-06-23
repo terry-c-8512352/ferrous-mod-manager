@@ -7,6 +7,8 @@
     position?: number;
     variant: 'installed' | 'collection';
     conflictSeverity?: ConflictSeverity;
+    achievementCompatible?: boolean;
+    achievementLabel?: string;
     inCollection?: boolean;
     ontoggle: () => void;
     onmoveup?: () => void;
@@ -15,7 +17,7 @@
     onmovetoposition?: (newPos: number) => void;
   }
 
-  let { mod, enabled, position, variant, conflictSeverity = 'none', inCollection = false, ontoggle, onmoveup, onmovedown, onremove, onmovetoposition }: Props = $props();
+  let { mod, enabled, position, variant, conflictSeverity = 'none', achievementCompatible = true, achievementLabel = '', inCollection = false, ontoggle, onmoveup, onmovedown, onremove, onmovetoposition }: Props = $props();
 
   let posValue = $state('');
   // Keep input in sync when position prop changes (drag/reorder/initial render)
@@ -69,6 +71,9 @@
       <span class="conflict-icon high" title="This mod has significant file conflicts">⚠</span>
     {:else if conflictSeverity === 'low'}
       <span class="conflict-icon low" title="This mod has minor file overlaps">·</span>
+    {/if}
+    {#if !achievementCompatible}
+      <span class="achievement-icon" title={achievementLabel}>⊘</span>
     {/if}
   </span>
 
@@ -187,6 +192,12 @@
     opacity: 0.5;
     font-size: 14px;
     font-weight: 700;
+  }
+
+  .achievement-icon {
+    margin-left: 4px;
+    font-size: 11px;
+    color: var(--tertiary);
   }
 
   .version {

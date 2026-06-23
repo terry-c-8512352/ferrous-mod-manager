@@ -31,37 +31,12 @@ fn scan_mods(mod_list: Vec<ModDescriptor>) -> HashMap<PathBuf, Vec<String>> {
     file_map
 }
 
-fn categorize_path(file_path: &Path) -> ConflictCategory {
-    match file_path
-        .components()
-        .next()
-        .and_then(|c| c.as_os_str().to_str())
-    {
-        Some("common") => {
-            match file_path
-                .components()
-                .nth(1)
-                .and_then(|c| c.as_os_str().to_str())
-            {
-                Some("defines") => ConflictCategory::Defines,
-                _ => ConflictCategory::GameData,
-            }
-        }
-        Some("localisation" | "localization") => ConflictCategory::Localisation,
-        Some("events") => ConflictCategory::Events,
-        Some("gfx" | "interface" | "fonts" | "dlc_metadata") => ConflictCategory::Gfx,
-        Some("sound" | "music") => ConflictCategory::Sound,
-        Some("map" | "map_data") => ConflictCategory::Map,
-        _ => ConflictCategory::Other,
-    }
-}
-
 pub fn conflict_detection(mods: Vec<ModDescriptor>) -> Vec<ModConflict> {
     let file_map = scan_mods(mods);
     let mut list_of_conflicts: Vec<ModConflict> = Vec::new();
     for (file_path, mod_list) in file_map {
         if mod_list.len() > 1 {
-            let mod_category = categorize_path(&file_path);
+            let mod_category = ConflictCategory::from_path(&file_path);
             list_of_conflicts.push(ModConflict {
                 file_path,
                 mod_list,
@@ -150,7 +125,7 @@ mod tests {
     #[test]
     fn test_categorize_defines() {
         assert_eq!(
-            categorize_path(Path::new("common/defines/00_defines.txt")),
+            ConflictCategory::from_path(Path::new("common/defines/00_defines.txt")),
             ConflictCategory::Defines
         );
     }
@@ -158,7 +133,7 @@ mod tests {
     #[test]
     fn test_categorize_game_data() {
         assert_eq!(
-            categorize_path(Path::new("common/traits/leader_traits.txt")),
+            ConflictCategory::from_path(Path::new("common/traits/leader_traits.txt")),
             ConflictCategory::GameData
         );
     }
@@ -166,11 +141,11 @@ mod tests {
     #[test]
     fn test_categorize_localisation() {
         assert_eq!(
-            categorize_path(Path::new("localisation/english/l_english.yml")),
+            ConflictCategory::from_path(Path::new("localisation/english/l_english.yml")),
             ConflictCategory::Localisation
         );
         assert_eq!(
-            categorize_path(Path::new("localization/english/l_english.yml")),
+            ConflictCategory::from_path(Path::new("localization/english/l_english.yml")),
             ConflictCategory::Localisation
         );
     }
@@ -178,7 +153,7 @@ mod tests {
     #[test]
     fn test_categorize_events() {
         assert_eq!(
-            categorize_path(Path::new("events/my_event.txt")),
+            ConflictCategory::from_path(Path::new("events/my_event.txt")),
             ConflictCategory::Events
         );
     }
@@ -186,11 +161,11 @@ mod tests {
     #[test]
     fn test_categorize_gfx() {
         assert_eq!(
-            categorize_path(Path::new("gfx/models/ship.mesh")),
+            ConflictCategory::from_path(Path::new("gfx/models/ship.mesh")),
             ConflictCategory::Gfx
         );
         assert_eq!(
-            categorize_path(Path::new("interface/topbar.gui")),
+            ConflictCategory::from_path(Path::new("interface/topbar.gui")),
             ConflictCategory::Gfx
         );
     }
@@ -198,7 +173,7 @@ mod tests {
     #[test]
     fn test_categorize_sound() {
         assert_eq!(
-            categorize_path(Path::new("sound/effects/boom.wav")),
+            ConflictCategory::from_path(Path::new("sound/effects/boom.wav")),
             ConflictCategory::Sound
         );
     }
@@ -206,7 +181,7 @@ mod tests {
     #[test]
     fn test_categorize_map() {
         assert_eq!(
-            categorize_path(Path::new("map/galaxy/setup.txt")),
+            ConflictCategory::from_path(Path::new("map/galaxy/setup.txt")),
             ConflictCategory::Map
         );
     }
@@ -214,7 +189,7 @@ mod tests {
     #[test]
     fn test_categorize_other() {
         assert_eq!(
-            categorize_path(Path::new("flags/custom_flag.tga")),
+            ConflictCategory::from_path(Path::new("flags/custom_flag.tga")),
             ConflictCategory::Other
         );
     }
