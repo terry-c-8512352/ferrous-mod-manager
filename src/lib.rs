@@ -1,3 +1,4 @@
+pub mod achievements;
 pub mod collections;
 pub mod conflict;
 pub mod detector;

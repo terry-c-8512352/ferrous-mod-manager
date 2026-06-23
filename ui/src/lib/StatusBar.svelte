@@ -4,10 +4,11 @@
     enabledMods: number;
     significantConflicts: number;
     minorConflicts: number;
+    achievementBlockers: number;
     activeGameName: string;
   }
 
-  let { totalMods, enabledMods, significantConflicts, minorConflicts, activeGameName }: Props = $props();
+  let { totalMods, enabledMods, significantConflicts, minorConflicts, achievementBlockers, activeGameName }: Props = $props();
 </script>
 
 <div class="status-bar">
@@ -23,6 +24,18 @@
   {#if minorConflicts > 0}
     <span class="sep">·</span>
     <span class="conflicts-minor">{minorConflicts} minor overlap{minorConflicts === 1 ? '' : 's'}</span>
+  {/if}
+  {#if enabledMods > 0}
+    <span class="sep">·</span>
+    {#if achievementBlockers > 0}
+      <span
+        class="ach-blocked"
+        title="{achievementBlockers} enabled mod{achievementBlockers === 1 ? '' : 's'} affect gameplay — achievements and ironman are disabled this session"
+        >⊘ achievements off ({achievementBlockers} mod{achievementBlockers === 1 ? '' : 's'})</span
+      >
+    {:else}
+      <span class="ach-ok" title="All enabled mods are cosmetic-only — achievements and ironman stay enabled">✓ achievements enabled</span>
+    {/if}
   {/if}
 </div>
 
@@ -56,5 +69,14 @@
   .conflicts-minor {
     color: var(--text);
     opacity: 0.7;
+  }
+
+  .ach-blocked {
+    color: var(--tertiary);
+    font-weight: 500;
+  }
+
+  .ach-ok {
+    color: var(--accent);
   }
 </style>

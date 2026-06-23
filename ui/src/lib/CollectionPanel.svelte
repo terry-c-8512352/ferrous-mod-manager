@@ -1,6 +1,6 @@
 <script lang="ts">
-    import type { ModCollection, ResolvedMod, ModConflict, ConflictSeverity, ConflictCategory } from "./types";
-    import { conflictSeverityForFile } from "./types";
+    import type { ModCollection, ResolvedMod, ModConflict, ConflictSeverity, ConflictCategory, AchievementStatus } from "./types";
+    import { conflictSeverityForFile, achievementSummary } from "./types";
     import ModRow from "./ModRow.svelte";
     import ConflictTooltip from "./ConflictTooltip.svelte";
 
@@ -9,6 +9,7 @@
         collections: ModCollection[];
         resolvedModMap: Map<string, ResolvedMod>;
         conflicts: ModConflict[];
+        achievementByModId: Map<string, AchievementStatus>;
         ontoggle: (modId: string) => void;
         onmove: (from: number, to: number) => void;
         onremove: (modId: string) => void;
@@ -24,6 +25,7 @@
         collections,
         resolvedModMap,
         conflicts,
+        achievementByModId,
         ontoggle,
         onmove,
         onremove,
@@ -309,6 +311,8 @@
                         position={idx + 1}
                         variant="collection"
                         conflictSeverity={modSeverityMap().get(entry.mod_id) ?? 'none'}
+                        achievementCompatible={achievementByModId.get(entry.mod_id)?.compatible ?? true}
+                        achievementLabel={achievementSummary(achievementByModId.get(entry.mod_id))}
                         ontoggle={() => ontoggle(entry.mod_id)}
                         onmoveup={idx > 0
                             ? () => onmove(idx, idx - 1)

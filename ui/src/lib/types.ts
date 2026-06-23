@@ -56,6 +56,34 @@ export function conflictSeverityForFile(conflict: ModConflict): ConflictSeverity
   return 'low';
 }
 
+export interface AchievementStatus {
+  mod_id: string;
+  compatible: boolean;
+  gameplay_categories: ConflictCategory[];
+}
+
+const GAMEPLAY_CATEGORY_LABELS: Record<ConflictCategory, string> = {
+  GameData: 'game data',
+  Events: 'events',
+  Map: 'map',
+  Defines: 'defines',
+  Other: 'other files',
+  Localisation: 'localisation',
+  Gfx: 'gfx',
+  Sound: 'sound',
+};
+
+// Human-readable explanation of a mod's achievement/ironman status, used for
+// the per-row indicator tooltip. Undefined status (still loading) reads as safe.
+export function achievementSummary(status: AchievementStatus | undefined): string {
+  if (!status || status.compatible) {
+    return 'Achievement-compatible — cosmetic only (gfx, sound, text)';
+  }
+  const cats = status.gameplay_categories.map((c) => GAMEPLAY_CATEGORY_LABELS[c] ?? c);
+  const detail = cats.length ? ` — affects ${cats.join(', ')}` : '';
+  return `Disables achievements & ironman${detail}`;
+}
+
 export interface ResolvedMod extends ModDescriptor {
   mod_id: string;
   source: 'workshop' | 'local';
