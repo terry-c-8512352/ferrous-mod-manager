@@ -33,10 +33,14 @@ use ferrous_mod_manager::models::{
 fn main() -> iced::Result {
     iced::application("Ferrous Mod Manager", App::update, App::view)
         .theme(App::theme)
-        .font(include_bytes!("../assets/fonts/Inter-Regular.ttf").as_slice())
-        .font(include_bytes!("../assets/fonts/Inter-Medium.ttf").as_slice())
-        .font(include_bytes!("../assets/fonts/Inter-SemiBold.ttf").as_slice())
-        .font(include_bytes!("../assets/fonts/Inter-Bold.ttf").as_slice())
+        // Static per-weight instances: cosmic-text/fontdb only matches discrete
+        // faces by weight, so a single variable font would render every
+        // non-400 label in the serif fallback. Medium/SemiBold register under
+        // the typographic family ("Exo 2") via their name table.
+        .font(include_bytes!("../assets/fonts/Exo2-Regular.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/Exo2-Medium.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/Exo2-SemiBold.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/Exo2-Bold.ttf").as_slice())
         .default_font(ui_font(Weight::Normal))
         .window_size(iced::Size::new(1280.0, 820.0))
         .run_with(App::new)
@@ -1029,7 +1033,7 @@ fn skin(dark: bool) -> Skin {
 
 fn ui_font(weight: Weight) -> iced::Font {
     iced::Font {
-        family: Family::Name("Inter"),
+        family: Family::Name("Exo 2"),
         weight,
         ..iced::Font::DEFAULT
     }

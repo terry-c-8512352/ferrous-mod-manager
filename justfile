@@ -29,6 +29,10 @@ mock-smoke: gen-mock
 mock-gui: gen-mock
     HOME='{{mock_home}}' WEBKIT_DISABLE_DMABUF_RENDERER=1 cargo tauri dev
 
+# Launch the native Iced UI (app-ui crate) against the mock $HOME.
+mock-ui: gen-mock
+    HOME='{{mock_home}}' cargo run -p app-ui
+
 # Remove the generated mock $HOME.
 clean-mock:
     rm -rf '{{mock_home}}'
