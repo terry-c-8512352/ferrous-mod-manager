@@ -1,5 +1,5 @@
 // Throwaway: drives the real backend pipeline against a mock $HOME so we can
-// confirm the GUI will get sensible data before installing the WebKit stack.
+// confirm the GUI will get sensible data.
 // Run with: HOME=<mockhome> cargo run --example mock_smoke -p ferrous-mod-manager
 use ferrous_mod_manager::{achievements, conflict, detector};
 

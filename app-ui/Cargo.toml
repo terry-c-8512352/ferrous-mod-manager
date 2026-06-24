@@ -5,6 +5,19 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# `default` keeps the wgpu (GPU) renderer for the shipped app. Building with
+# `--no-default-features` drops wgpu and leaves only tiny-skia, iced's CPU
+# renderer — needed for headless capture under Xvfb, where the software-GL
+# stack segfaults inside wgpu before iced can fall back on its own.
+[features]
+default = ["wgpu"]
+wgpu = ["iced/wgpu"]
+
 [dependencies]
 ferrous-mod-manager = { path = ".." }
-iced = { version = "0.13", features = ["svg"] }
+iced = { version = "0.13", default-features = false, features = [
+    "tiny-skia",
+    "fira-sans",
+    "auto-detect-theme",
+    "svg",
+] }

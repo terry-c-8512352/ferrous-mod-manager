@@ -42,7 +42,12 @@ fn main() -> iced::Result {
         .font(include_bytes!("../assets/fonts/Exo2-SemiBold.ttf").as_slice())
         .font(include_bytes!("../assets/fonts/Exo2-Bold.ttf").as_slice())
         .default_font(ui_font(Weight::Normal))
-        .window_size(iced::Size::new(1280.0, 820.0))
+        .window(iced::window::Settings {
+            size: iced::Size::new(1280.0, 820.0),
+            // Below this the two-pane layout collapses and content vanishes.
+            min_size: Some(iced::Size::new(900.0, 600.0)),
+            ..Default::default()
+        })
         .run_with(App::new)
 }
 

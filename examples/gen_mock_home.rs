@@ -11,7 +11,7 @@
 //
 //   cargo run --example gen_mock_home -- ./mock-home   # build it
 //   HOME=$(pwd)/mock-home cargo run --example mock_smoke -p ferrous-mod-manager
-//   HOME=$(pwd)/mock-home WEBKIT_DISABLE_DMABUF_RENDERER=1 cargo tauri dev   # real GUI
+//   HOME=$(pwd)/mock-home cargo run -p app-ui   # real GUI (or: just mock-ui)
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -49,7 +49,7 @@ fn main() {
     println!("Mock $HOME ready at: {}", abs.display());
     println!("\nTry it:");
     println!("  HOME={} cargo run --example mock_smoke -p ferrous-mod-manager", abs.display());
-    println!("  HOME={} WEBKIT_DISABLE_DMABUF_RENDERER=1 cargo tauri dev", abs.display());
+    println!("  HOME={} cargo run -p app-ui", abs.display());
 }
 
 /// Two Steam libraries: Stellaris (with mods) plus CK3 to exercise multi-game
