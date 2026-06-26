@@ -46,11 +46,19 @@ fn detect_games_from_home(home: &Path) -> Result<Vec<DetectedGame>, DetectionErr
         ),
     ]);
 
-    let vdf_path = home
-        .join(".steam")
-        .join("steam")
-        .join("steamapps")
-        .join("libraryfolders.vdf");
+    let candidates = crate::locations::steam_library_vdf_candidates(home);
+    // Use the first candidate that exists; otherwise fall back to the first so
+    // the missing-file case still surfaces as a descriptive IO error.
+    let vdf_path = candidates
+        .iter()
+        .find(|p| p.exists())
+        .cloned()
+        .unwrap_or_else(|| {
+            candidates
+                .into_iter()
+                .next()
+                .expect("at least one candidate")
+        });
 
     let content = fs::read_to_string(&vdf_path)?;
     let libraries = vdf::parse_vdf_file(&content)?;
@@ -67,10 +75,7 @@ fn detect_games_from_home(home: &Path) -> Result<Vec<DetectedGame>, DetectionErr
                     .to_string_lossy()
                     .into_owned();
 
-                let paradox_data_path = home
-                    .join(".local")
-                    .join("share")
-                    .join("Paradox Interactive")
+                let paradox_data_path = crate::locations::paradox_data_root(home)
                     .join(paradox_folder)
                     .to_string_lossy()
                     .into_owned();

@@ -15,6 +15,24 @@ pub fn create_collection_for_game(
     Ok(mc)
 }
 
+/// Name given to the collection created automatically when a game has none yet.
+pub const DEFAULT_COLLECTION_NAME: &str = "Default";
+
+/// Load every collection for a game, creating and persisting an empty default
+/// collection when none exist yet. This guarantees a freshly detected game
+/// always has at least one selectable collection on first launch, rather than
+/// presenting an empty/"no collection" state.
+pub fn load_or_create_collections_for_game(
+    app_id: u32,
+) -> Result<Vec<ModCollection>, FileOperationError> {
+    let mut collections = load_collection_for_game(game_data_dir(app_id));
+    if collections.is_empty() {
+        let default = create_collection_for_game(app_id, DEFAULT_COLLECTION_NAME.to_string())?;
+        collections.push(default);
+    }
+    Ok(collections)
+}
+
 pub fn load_collection_for_game(path: PathBuf) -> Vec<ModCollection> {
     let mut mod_collections: Vec<ModCollection> = vec![];
     let Ok(read_result) = read_dir(path.as_path()) else {
@@ -37,6 +55,20 @@ pub fn load_collection_for_game(path: PathBuf) -> Vec<ModCollection> {
     }
 
     mod_collections
+}
+
+/// Import a collection from an external JSON file into a game's collection
+/// store. The imported collection is given a fresh UUID before saving so it can
+/// never overwrite an existing collection (even one exported from this same
+/// game), and is returned for the UI to select.
+pub fn import_collection_for_game(
+    app_id: u32,
+    path: &Path,
+) -> Result<ModCollection, FileOperationError> {
+    let mut collection = ModCollection::load(path)?;
+    collection.id = Uuid::new_v4();
+    save_collection_for_game(app_id, &collection)?;
+    Ok(collection)
 }
 
 pub fn save_collection_for_game(
@@ -101,6 +133,49 @@ mod tests {
         assert_eq!(mod_collection[0].name, "test-collection");
         assert_eq!(mod_collection[0].mods.iter().len(), 1);
         assert_eq!(mod_collection[0].mods[0].mod_id, "path/to/mod")
+    }
+
+    #[test]
+    fn test_load_or_create_creates_default_then_reuses_it() {
+        // Unlikely app_id so we don't collide with a real game's collections.
+        let app_id = 4_294_967_290;
+        let dir = game_data_dir(app_id);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let first = load_or_create_collections_for_game(app_id).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].name, DEFAULT_COLLECTION_NAME);
+
+        // A second call must reuse the persisted default, not create another.
+        let second = load_or_create_collections_for_game(app_id).unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].id, first[0].id);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_import_assigns_fresh_id_and_persists() {
+        let app_id = 4_294_967_289;
+        let dir = game_data_dir(app_id);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // An external export file with a known id.
+        let mut exported = ModCollection::new("Imported");
+        exported.add_mod("12345".to_string());
+        let export_path = std::env::temp_dir().join("ferrous_import_test.json");
+        exported.save(&export_path).unwrap();
+
+        let imported = import_collection_for_game(app_id, &export_path).unwrap();
+        assert_eq!(imported.name, "Imported");
+        assert_eq!(imported.mods.len(), 1);
+        // Fresh id so an import never clobbers an existing collection.
+        assert_ne!(imported.id, exported.id);
+        // Persisted under the new id.
+        assert!(dir.join(format!("{}.json", imported.id)).exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&export_path);
     }
 
     #[test]
