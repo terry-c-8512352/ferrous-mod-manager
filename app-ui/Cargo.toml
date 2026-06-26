@@ -21,3 +21,9 @@ iced = { version = "0.13", default-features = false, features = [
     "auto-detect-theme",
     "svg",
 ] }
+# Native file picker for collection import/export. The xdg-portal backend is
+# pure-Rust (D-Bus portal, no system GTK at build time); MIT-licensed.
+rfd = { version = "0.15", default-features = false, features = [
+    "xdg-portal",
+    "async-std",
+] }

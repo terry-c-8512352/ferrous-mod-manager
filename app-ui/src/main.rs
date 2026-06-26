@@ -10,22 +10,26 @@
 //! from the core and are recomputed when the active loadout changes.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::Instant;
 
 use iced::font::{Family, Weight};
 use iced::widget::{
     Space, button, checkbox, column, container, mouse_area, pick_list, row, scrollable, svg, text,
     text_input,
 };
-use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Task, Theme, Vector};
+use iced::{
+    Alignment, Background, Border, Color, Element, Length, Shadow, Subscription, Task, Theme,
+    Vector,
+};
 
 use ferrous_mod_manager::achievements::achievement_status_for_mods;
 use ferrous_mod_manager::collections::{
     apply_mod_collection_for_game, create_collection_for_game, delete_collection_for_game,
-    load_collection_for_game, save_collection_for_game,
+    import_collection_for_game, load_or_create_collections_for_game, save_collection_for_game,
 };
 use ferrous_mod_manager::conflict::conflict_detection;
 use ferrous_mod_manager::detector::{detect_games, discover_mods};
-use ferrous_mod_manager::locations::game_data_dir;
+use ferrous_mod_manager::launch::launch_game;
 use ferrous_mod_manager::models::{
     ConflictCategory, DetectedGame, ModCollection, ModDescriptor, ModEntry,
 };
@@ -33,6 +37,7 @@ use ferrous_mod_manager::models::{
 fn main() -> iced::Result {
     iced::application("Ferrous Mod Manager", App::update, App::view)
         .theme(App::theme)
+        .subscription(App::subscription)
         // Static per-weight instances: cosmic-text/fontdb only matches discrete
         // faces by weight, so a single variable font would render every
         // non-400 label in the serif fallback. Medium/SemiBold register under
@@ -59,6 +64,8 @@ fn main() -> iced::Result {
 struct Installed {
     mod_id: String,
     name: String,
+    /// Single-line secondary text (workshop id, or local mod's basename).
+    subtitle: String,
     workshop: bool,
 }
 
@@ -83,6 +90,13 @@ struct Toast {
     kind: ToastKind,
 }
 
+/// Which top-level screen is shown.
+#[derive(Clone, Copy, PartialEq)]
+enum Screen {
+    Main,
+    Collections,
+}
+
 struct App {
     games: Vec<DetectedGame>,
     selected_game: usize,
@@ -100,21 +114,45 @@ struct App {
     conflicts: HashMap<String, ConflictsForMod>,
 
     // UI state.
+    screen: Screen,
     dark: bool,
     filter: String,
     new_collection: String,
+    /// (index being renamed, edit buffer) on the collections screen.
+    renaming: Option<(usize, String)>,
+    /// Collection ids (as strings) checked for bulk delete on the collections screen.
+    marked: HashSet<String>,
     dragging: Option<usize>,
     expanded: Option<usize>,
+    /// Installed-list scroll offset (px) and last-known viewport height (px).
+    installed_scroll: f32,
+    installed_view_h: f32,
     toast: Option<Toast>,
+    /// Seconds the current toast has been visible (drives fade in/out).
+    toast_age: f32,
+    /// Toast message last seen, to detect when a fresh toast appears.
+    toast_key: Option<String>,
+    /// Timestamp of the previous animation frame.
+    last_tick: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     SelectGame(String),
     SelectCollection(String),
+    SelectCollectionAt(usize),
+    OpenCollections,
+    CloseCollections,
     NewCollectionChanged(String),
     CreateCollection,
-    DeleteCollection,
+    ToggleMark(String),
+    DeleteMarked,
+    ImportCollection,
+    ExportCollection(usize),
+    RenameStart(usize),
+    RenameBufferChanged(String),
+    RenameCommit,
+    RenameCancel,
     ToggleTheme,
     FilterChanged(String),
     AddToCollection(String),
@@ -133,7 +171,21 @@ enum Message {
     Apply,
     Launch,
     DismissToast,
+    Tick(Instant),
+    /// Installed list scrolled: (absolute y offset, viewport height).
+    InstalledScrolled(f32, f32),
 }
+
+// Installed-list virtualization: fixed slot height + how many extra rows to
+// render above/below the viewport so fast scrolls don't flash blank.
+const INSTALLED_ROW_H: f32 = 72.0;
+const INSTALLED_OVERSCAN: usize = 4;
+
+// Toast animation timing (seconds).
+const TOAST_FADE_IN: f32 = 0.22;
+const TOAST_FADE_OUT: f32 = 0.45;
+const TOAST_HOLD: f32 = 3.2;
+const TOAST_TOTAL: f32 = TOAST_FADE_IN + TOAST_HOLD + TOAST_FADE_OUT;
 
 impl App {
     fn new() -> (Self, Task<Message>) {
@@ -148,17 +200,37 @@ impl App {
             collections: vec![],
             selected_collection: 0,
             conflicts: HashMap::new(),
+            screen: Screen::Main,
             dark: true,
             filter: String::new(),
             new_collection: String::new(),
+            renaming: None,
+            marked: HashSet::new(),
             dragging: None,
             expanded: None,
+            installed_scroll: 0.0,
+            // Generous default so the first paint (before any scroll event)
+            // fills the pane; corrected on the first real scroll.
+            installed_view_h: 820.0,
             toast: None,
+            toast_age: 0.0,
+            toast_key: None,
+            last_tick: None,
         };
         if !app.games.is_empty() {
             app.load_game();
         }
         (app, Task::none())
+    }
+
+    /// Drive toast fade in/out by requesting animation frames only while a
+    /// toast is on screen; otherwise the app stays idle (event-driven).
+    fn subscription(&self) -> Subscription<Message> {
+        if self.toast.is_some() {
+            iced::window::frames().map(Message::Tick)
+        } else {
+            Subscription::none()
+        }
     }
 
     fn theme(&self) -> Theme {
@@ -193,16 +265,44 @@ impl App {
             .collect();
         self.installed = descriptors
             .iter()
-            .map(|d| Installed {
-                mod_id: d.mod_id().to_string(),
-                name: d.name.clone().unwrap_or_else(|| "<unnamed>".into()),
-                workshop: d.remote_file_id.is_some(),
+            .map(|d| {
+                let mod_id = d.mod_id().to_string();
+                let workshop = d.remote_file_id.is_some();
+                // Keep the secondary line short and single-line so installed
+                // rows have a uniform height (required by virtualization):
+                // workshop id verbatim, local mods reduced to their basename.
+                let subtitle = if workshop {
+                    format!("#{mod_id}")
+                } else {
+                    std::path::Path::new(&mod_id)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| mod_id.clone())
+                };
+                Installed {
+                    mod_id,
+                    name: d.name.clone().unwrap_or_else(|| "<unnamed>".into()),
+                    subtitle,
+                    workshop,
+                }
             })
             .collect();
         self.descriptors = descriptors;
-        self.collections = load_collection_for_game(game_data_dir(app_id));
+        self.collections = match load_or_create_collections_for_game(app_id) {
+            Ok(cs) => cs,
+            Err(e) => {
+                self.toast = Some(Toast {
+                    message: format!("Could not initialize collections: {e}"),
+                    kind: ToastKind::Error,
+                });
+                Vec::new()
+            }
+        };
         self.selected_collection = 0;
+        self.renaming = None;
+        self.marked.clear();
         self.expanded = None;
+        self.installed_scroll = 0.0;
         self.recompute_conflicts();
     }
 
@@ -299,28 +399,156 @@ impl App {
                     }
                 }
             }
-            Message::DeleteCollection => {
-                // Keep at least one collection, mirroring the previous UI.
-                if self.collections.len() > 1
-                    && let Some(c) = self.collections.get(self.selected_collection)
-                {
+            Message::SelectCollectionAt(i) => {
+                if i < self.collections.len() {
+                    self.selected_collection = i;
+                    self.expanded = None;
+                    self.recompute_conflicts();
+                }
+            }
+            Message::OpenCollections => {
+                self.renaming = None;
+                self.marked.clear();
+                self.screen = Screen::Collections;
+            }
+            Message::CloseCollections => {
+                self.renaming = None;
+                self.marked.clear();
+                self.screen = Screen::Main;
+            }
+            Message::ToggleMark(id) => {
+                if !self.marked.remove(&id) {
+                    self.marked.insert(id);
+                }
+            }
+            Message::DeleteMarked => {
+                // Always keep at least one collection; refuse a wipe-all.
+                if self.marked.is_empty() {
+                    // nothing to do
+                } else if self.marked.len() >= self.collections.len() {
+                    self.toast = Some(Toast {
+                        message: "At least one collection must remain.".to_string(),
+                        kind: ToastKind::Error,
+                    });
+                } else {
                     let app_id = self.games[self.selected_game].app_id;
-                    let id = c.id;
-                    if let Err(e) = delete_collection_for_game(app_id, id) {
+                    let active_id = self
+                        .collections
+                        .get(self.selected_collection)
+                        .map(|c| c.id.to_string());
+                    let mut failed = 0;
+                    for c in &self.collections {
+                        if self.marked.contains(&c.id.to_string())
+                            && delete_collection_for_game(app_id, c.id).is_err()
+                        {
+                            failed += 1;
+                        }
+                    }
+                    self.collections
+                        .retain(|c| !self.marked.contains(&c.id.to_string()));
+                    // Restore the active selection by id; fall back to the first.
+                    self.selected_collection = active_id
+                        .and_then(|id| self.collections.iter().position(|c| c.id.to_string() == id))
+                        .unwrap_or(0);
+                    self.marked.clear();
+                    self.renaming = None;
+                    self.expanded = None;
+                    self.recompute_conflicts();
+                    if failed > 0 {
                         self.toast = Some(Toast {
-                            message: format!("Delete failed: {e}"),
+                            message: format!("{failed} collection(s) could not be deleted"),
                             kind: ToastKind::Error,
                         });
-                    } else {
-                        self.collections.remove(self.selected_collection);
-                        self.selected_collection = self.selected_collection.saturating_sub(1);
-                        self.expanded = None;
-                        self.recompute_conflicts();
                     }
                 }
             }
+            Message::ImportCollection => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Collection JSON", &["json"])
+                    .set_title("Import collection")
+                    .pick_file()
+                {
+                    let app_id = self.games[self.selected_game].app_id;
+                    match import_collection_for_game(app_id, &path) {
+                        Ok(c) => {
+                            self.collections.push(c);
+                            self.selected_collection = self.collections.len() - 1;
+                            self.recompute_conflicts();
+                            self.toast = Some(Toast {
+                                message: "Collection imported".to_string(),
+                                kind: ToastKind::Success,
+                            });
+                        }
+                        Err(e) => {
+                            self.toast = Some(Toast {
+                                message: format!("Import failed: {e}"),
+                                kind: ToastKind::Error,
+                            });
+                        }
+                    }
+                }
+            }
+            Message::ExportCollection(i) => {
+                if let Some(c) = self.collections.get(i) {
+                    let default_name = format!("{}.json", sanitize_filename(&c.name));
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Collection JSON", &["json"])
+                        .set_file_name(default_name)
+                        .set_title("Export collection")
+                        .save_file()
+                    {
+                        self.toast = Some(match c.save(&path) {
+                            Ok(()) => Toast {
+                                message: format!("Exported \"{}\"", c.name),
+                                kind: ToastKind::Success,
+                            },
+                            Err(e) => Toast {
+                                message: format!("Export failed: {e}"),
+                                kind: ToastKind::Error,
+                            },
+                        });
+                    }
+                }
+            }
+            Message::RenameStart(i) => {
+                if let Some(c) = self.collections.get(i) {
+                    self.renaming = Some((i, c.name.clone()));
+                }
+            }
+            Message::RenameBufferChanged(v) => {
+                if let Some((_, buf)) = self.renaming.as_mut() {
+                    *buf = v;
+                }
+            }
+            Message::RenameCommit => {
+                if let Some((i, buf)) = self.renaming.take() {
+                    let name = buf.trim().to_string();
+                    if !name.is_empty()
+                        && let Some(c) = self.collections.get_mut(i)
+                    {
+                        c.name = name;
+                        let app_id = self.games[self.selected_game].app_id;
+                        if let Err(e) = save_collection_for_game(app_id, c) {
+                            self.toast = Some(Toast {
+                                message: format!("Rename failed: {e}"),
+                                kind: ToastKind::Error,
+                            });
+                        }
+                    }
+                }
+            }
+            Message::RenameCancel => self.renaming = None,
             Message::ToggleTheme => self.dark = !self.dark,
-            Message::FilterChanged(v) => self.filter = v,
+            Message::FilterChanged(v) => {
+                self.filter = v;
+                // Filtered length changes; start from the top so the virtual
+                // window doesn't point past the new end.
+                self.installed_scroll = 0.0;
+            }
+            Message::InstalledScrolled(offset, height) => {
+                self.installed_scroll = offset;
+                self.installed_view_h = height;
+            }
             Message::AddToCollection(mod_id) => {
                 if let Some(c) = self.collections.get_mut(self.selected_collection)
                     && !c.mods.iter().any(|m| m.mod_id == mod_id)
@@ -442,13 +670,55 @@ impl App {
                 }
             }
             Message::Launch => {
-                self.toast = Some(Toast {
-                    message: "Launch: not implemented yet".to_string(),
-                    kind: ToastKind::Success,
+                let game = &self.games[self.selected_game];
+                // Apply the active collection first so the game boots with it,
+                // then hand off to Steam. Surface an apply failure and stop.
+                let apply_err = self
+                    .collections
+                    .get(self.selected_collection)
+                    .and_then(|c| apply_mod_collection_for_game(game, c).err());
+                self.toast = Some(match apply_err {
+                    Some(e) => Toast {
+                        message: format!("Apply failed, not launching: {e}"),
+                        kind: ToastKind::Error,
+                    },
+                    None => match launch_game(game.app_id) {
+                        Ok(()) => Toast {
+                            message: format!("Launching {}…", game.game_name),
+                            kind: ToastKind::Success,
+                        },
+                        Err(e) => Toast {
+                            message: format!("Launch failed: {e}"),
+                            kind: ToastKind::Error,
+                        },
+                    },
                 });
             }
             Message::DismissToast => self.toast = None,
+            Message::Tick(now) => {
+                let dt = self
+                    .last_tick
+                    .map(|prev| (now - prev).as_secs_f32())
+                    .unwrap_or(0.0)
+                    // Clamp so a long idle gap can't jump the toast straight out.
+                    .min(0.1);
+                self.last_tick = Some(now);
+                self.toast_age += dt;
+                if self.toast_age >= TOAST_TOTAL {
+                    self.toast = None;
+                }
+            }
         }
+
+        // Detect a freshly shown toast (set by any arm above) and restart its
+        // animation clock — avoids resetting at every individual toast site.
+        let key = self.toast.as_ref().map(|t| t.message.clone());
+        if key != self.toast_key {
+            self.toast_key = key;
+            self.toast_age = 0.0;
+            self.last_tick = None;
+        }
+
         Task::none()
     }
 
@@ -469,6 +739,13 @@ impl App {
             .into();
         }
 
+        match self.screen {
+            Screen::Main => self.main_screen(s),
+            Screen::Collections => self.collections_screen(s),
+        }
+    }
+
+    fn main_screen(&self, s: Skin) -> Element<'_, Message> {
         let mut content = column![self.top_bar(s), divider(s.border)].spacing(16);
 
         let main = row![self.installed_pane(s), self.collection_pane(s)]
@@ -479,7 +756,7 @@ impl App {
         content = content.push(mouse_area(main).on_release(Message::DragEnd));
 
         if let Some(t) = &self.toast {
-            content = content.push(toast_banner(s, t));
+            content = content.push(toast_banner(s, t, self.toast_age));
         }
         content = content.push(self.status_bar(s));
 
@@ -511,15 +788,7 @@ impl App {
             .text_size(14.0)
             .padding([7, 11]);
 
-        let new_input = text_input("New collection…", &self.new_collection)
-            .on_input(Message::NewCollectionChanged)
-            .on_submit(Message::CreateCollection)
-            .padding([7, 10])
-            .size(13.0)
-            .width(Length::Fixed(170.0));
-
-        let create_btn = soft_icon_button(s, I_PLUS, Message::CreateCollection, s.primary);
-        let delete_btn = soft_icon_button(s, I_TRASH, Message::DeleteCollection, s.danger);
+        let manage_btn = ghost_button(s, I_LAYERS, "Manage", Message::OpenCollections);
 
         let apply_btn = primary_button(s, I_CHECK, "Apply", Message::Apply);
         let launch_btn = ghost_button(s, I_PLAY, "Launch", Message::Launch);
@@ -535,9 +804,7 @@ impl App {
             game_sel,
             vsep(s.border),
             col_sel,
-            new_input,
-            create_btn,
-            delete_btn,
+            manage_btn,
             Space::with_width(Length::Fill),
             apply_btn,
             launch_btn,
@@ -575,19 +842,41 @@ impl App {
             .padding([8, 11])
             .size(13.0);
 
-        let mut list = column![].spacing(6);
-        for m in &self.installed {
-            if !needle.is_empty()
-                && !m.name.to_lowercase().contains(&needle)
-                && !m.mod_id.to_lowercase().contains(&needle)
-            {
-                continue;
-            }
-            let added = in_collection.contains(m.mod_id.as_str());
-            list = list.push(self.installed_row(s, m, added));
-        }
+        // Virtualize: only build the rows inside (and just around) the viewport,
+        // padding above/below with fixed-height spacers so the scrollbar and
+        // offsets behave as if the whole list were present.
+        let filtered: Vec<&Installed> = self
+            .installed
+            .iter()
+            .filter(|m| {
+                needle.is_empty()
+                    || m.name.to_lowercase().contains(&needle)
+                    || m.mod_id.to_lowercase().contains(&needle)
+            })
+            .collect();
+        let n = filtered.len();
+        let row_h = INSTALLED_ROW_H;
+        let first =
+            ((self.installed_scroll / row_h).floor() as usize).saturating_sub(INSTALLED_OVERSCAN);
+        let span = (self.installed_view_h / row_h).ceil() as usize + INSTALLED_OVERSCAN * 2;
+        let end = (first + span).min(n);
+        let top_pad = first as f32 * row_h;
+        let bottom_pad = n.saturating_sub(end) as f32 * row_h;
 
-        let body = scrollable(list).height(Length::Fill);
+        let mut list = column![Space::with_height(Length::Fixed(top_pad))].spacing(0);
+        for m in &filtered[first..end] {
+            let added = in_collection.contains(m.mod_id.as_str());
+            list = list.push(
+                container(self.installed_row(s, m, added))
+                    .center_y(Length::Fixed(row_h))
+                    .clip(true),
+            );
+        }
+        list = list.push(Space::with_height(Length::Fixed(bottom_pad)));
+
+        let body = scrollable(list)
+            .height(Length::Fill)
+            .on_scroll(|vp| Message::InstalledScrolled(vp.absolute_offset().y, vp.bounds().height));
         pane(s, column![header, search, body].spacing(12))
     }
 
@@ -622,8 +911,10 @@ impl App {
 
         let main = row![
             column![
-                label(m.name.clone(), 14.0, Weight::Semibold, s.text),
-                label(format!("#{}", m.mod_id), 11.5, Weight::Normal, s.faint),
+                label(m.name.clone(), 14.0, Weight::Semibold, s.text)
+                    .wrapping(text::Wrapping::None),
+                label(m.subtitle.clone(), 11.5, Weight::Normal, s.faint)
+                    .wrapping(text::Wrapping::None),
             ]
             .spacing(2)
             .width(Length::Fill),
@@ -777,19 +1068,26 @@ impl App {
 
         let remove = ghost_icon_btn(s, I_X, Message::RemoveFromCollection(entry.mod_id.clone()));
 
-        let main = row![
-            handle,
-            position,
-            enabled,
-            column![title, mod_id].spacing(3).width(Length::Fill),
-            ach,
-            conflict_cell,
-            reorder,
-            remove,
-        ]
-        .spacing(13)
-        .align_y(Alignment::Center)
-        .padding([11, 14]);
+        // Stack name, location and status vertically so the ironman/conflict
+        // indicators no longer steal width from (and truncate) the name/path.
+        let has_ach = self.achievement_ok.contains_key(&entry.mod_id);
+        let has_conflict = self.conflicts.get(&name).is_some_and(|c| !c.is_empty());
+        let mut info = column![title, mod_id].spacing(3).width(Length::Fill);
+        if has_ach || has_conflict {
+            let mut status = row![].spacing(8).align_y(Alignment::Center);
+            if has_ach {
+                status = status.push(ach);
+            }
+            if has_conflict {
+                status = status.push(conflict_cell);
+            }
+            info = info.push(status);
+        }
+
+        let main = row![handle, position, enabled, info, reorder, remove]
+            .spacing(13)
+            .align_y(Alignment::Center)
+            .padding([11, 14]);
 
         let card = container(main).style(move |_: &Theme| card_style(s, dragging));
         let row_area = mouse_area(card).on_enter(Message::DragEnterRow(i));
@@ -864,6 +1162,145 @@ impl App {
         })
         .into()
     }
+
+    // ----- collections management screen ------------------------------------
+
+    fn collections_screen(&self, s: Skin) -> Element<'_, Message> {
+        let back = ghost_button(s, I_CHEV_LEFT, "Back", Message::CloseCollections);
+        let title = label("Manage Collections".into(), 18.0, Weight::Semibold, s.text);
+        let game = self
+            .games
+            .get(self.selected_game)
+            .map(|g| g.game_name.as_str())
+            .unwrap_or("");
+        let header = row![
+            back,
+            title,
+            Space::with_width(Length::Fill),
+            label(game.to_string(), 13.0, Weight::Semibold, s.faint),
+        ]
+        .spacing(14)
+        .align_y(Alignment::Center);
+
+        let new_input = text_input("New collection name…", &self.new_collection)
+            .on_input(Message::NewCollectionChanged)
+            .on_submit(Message::CreateCollection)
+            .padding([8, 11])
+            .size(14.0)
+            .width(Length::Fixed(300.0));
+        let create_btn = primary_button(s, I_PLUS, "Create", Message::CreateCollection);
+        let import_btn = ghost_button(s, I_DOWNLOAD, "Import", Message::ImportCollection);
+
+        // Bulk-delete button only when something is marked.
+        let delete_marked: Element<'_, Message> = if self.marked.is_empty() {
+            Space::with_width(0).into()
+        } else {
+            danger_button(
+                s,
+                I_TRASH,
+                &format!("Delete {}", self.marked.len()),
+                Message::DeleteMarked,
+            )
+        };
+
+        let create_row = row![
+            new_input,
+            create_btn,
+            import_btn,
+            Space::with_width(Length::Fill),
+            delete_marked,
+        ]
+        .spacing(9)
+        .align_y(Alignment::Center);
+
+        let mut list = column![].spacing(8);
+        for (i, c) in self.collections.iter().enumerate() {
+            list = list.push(self.collection_manage_row(s, i, c));
+        }
+        let body = scrollable(list).height(Length::Fill);
+
+        let mut content = column![header, divider(s.border), create_row, body].spacing(18);
+        if let Some(t) = &self.toast {
+            content = content.push(toast_banner(s, t, self.toast_age));
+        }
+
+        container(content)
+            .padding(24)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_: &Theme| bg_style(s.bg))
+            .into()
+    }
+
+    fn collection_manage_row(&self, s: Skin, i: usize, c: &ModCollection) -> Element<'_, Message> {
+        let is_active = self.selected_collection == i;
+        let renaming_this = matches!(&self.renaming, Some((ri, _)) if *ri == i);
+        let count = c.mods.len();
+        let id = c.id.to_string();
+
+        let mark = checkbox("", self.marked.contains(&id))
+            .on_toggle({
+                let id = id.clone();
+                move |_| Message::ToggleMark(id.clone())
+            })
+            .size(17);
+
+        let name_area: Element<'_, Message> =
+            if let Some((_, buf)) = self.renaming.as_ref().filter(|(ri, _)| *ri == i) {
+                row![
+                    text_input("Collection name…", buf)
+                        .on_input(Message::RenameBufferChanged)
+                        .on_submit(Message::RenameCommit)
+                        .padding([6, 10])
+                        .size(14.0)
+                        .width(Length::Fixed(300.0)),
+                    soft_icon_button(s, I_CHECK, Message::RenameCommit, s.success),
+                    soft_icon_button(s, I_X, Message::RenameCancel, s.muted),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+            } else {
+                let color = if is_active { s.primary } else { s.text };
+                mouse_area(label(c.name.clone(), 15.0, Weight::Semibold, color))
+                    .on_press(Message::SelectCollectionAt(i))
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .into()
+            };
+
+        let active_badge: Element<'_, Message> = if is_active {
+            pill_plain("active", s.primary)
+        } else {
+            Space::with_width(0).into()
+        };
+
+        let actions: Element<'_, Message> = if renaming_this {
+            Space::with_width(0).into()
+        } else {
+            row![
+                ghost_button(s, I_UPLOAD, "Export", Message::ExportCollection(i)),
+                ghost_button(s, I_PENCIL, "Rename", Message::RenameStart(i)),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
+        };
+
+        let main = row![
+            mark,
+            container(name_area).width(Length::Fill),
+            active_badge,
+            label(format!("{count} mods"), 12.5, Weight::Medium, s.faint),
+            actions,
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .padding([12, 14]);
+
+        container(main)
+            .style(move |_: &Theme| card_style(s, false))
+            .into()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -887,27 +1324,39 @@ fn pane<'a>(s: Skin, inner: impl Into<Element<'a, Message>>) -> Element<'a, Mess
         .into()
 }
 
-fn toast_banner<'a>(s: Skin, t: &Toast) -> Element<'a, Message> {
-    let color = match t.kind {
+/// Fade-in/out curve and slide offset for a toast of the given age (seconds).
+fn toast_anim(age: f32) -> (f32, f32) {
+    let fade_in = (age / TOAST_FADE_IN).clamp(0.0, 1.0);
+    let fade_out = ((TOAST_TOTAL - age) / TOAST_FADE_OUT).clamp(0.0, 1.0);
+    let opacity = fade_in.min(fade_out);
+    // Slide up into place as it fades in.
+    let slide = (1.0 - fade_in) * 8.0;
+    (opacity, slide)
+}
+
+fn toast_banner<'a>(s: Skin, t: &Toast, age: f32) -> Element<'a, Message> {
+    let (op, slide) = toast_anim(age);
+    let base = match t.kind {
         ToastKind::Error => s.danger,
         ToastKind::Success => s.success,
     };
+    let fg = alpha(base, op);
     let lead = if matches!(t.kind, ToastKind::Error) {
         I_ALERT
     } else {
         I_CHECK
     };
-    let dismiss = button(icon(I_X, 13.0, color))
+    let dismiss = button(icon(I_X, 13.0, fg))
         .padding(4)
         .on_press(Message::DismissToast)
         .style(|_: &Theme, _| button::Style {
             background: None,
             ..button::Style::default()
         });
-    container(
+    let banner = container(
         row![
-            icon(lead, 15.0, color),
-            label(t.message.clone(), 13.0, Weight::Medium, color).width(Length::Fill),
+            icon(lead, 15.0, fg),
+            label(t.message.clone(), 13.0, Weight::Medium, fg).width(Length::Fill),
             dismiss,
         ]
         .spacing(9)
@@ -915,15 +1364,19 @@ fn toast_banner<'a>(s: Skin, t: &Toast) -> Element<'a, Message> {
     )
     .padding([8, 12])
     .style(move |_: &Theme| container::Style {
-        background: Some(Background::Color(alpha(color, 0.14))),
+        background: Some(Background::Color(alpha(base, 0.14 * op))),
         border: Border {
             radius: 10.0.into(),
             width: 1.0,
-            color: alpha(color, 0.4),
+            color: alpha(base, 0.4 * op),
         },
         ..container::Style::default()
-    })
-    .into()
+    });
+
+    // Top spacer shrinks to zero as the toast settles — a subtle upward slide.
+    column![Space::with_height(Length::Fixed(slide)), banner]
+        .spacing(0)
+        .into()
 }
 
 fn conflict_detail(s: Skin, c: &ConflictsForMod) -> Element<'_, Message> {
@@ -1135,6 +1588,36 @@ fn primary_button<'a>(s: Skin, src: &'static str, lbl: &str, msg: Message) -> El
     .into()
 }
 
+/// Filled danger action button (icon + label) for destructive actions.
+fn danger_button<'a>(s: Skin, src: &'static str, lbl: &str, msg: Message) -> Element<'a, Message> {
+    button(
+        row![
+            icon(src, 14.0, Color::WHITE),
+            label(lbl.to_string(), 13.0, Weight::Semibold, Color::WHITE),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+    .padding([7, 13])
+    .on_press(msg)
+    .style(move |_: &Theme, status| {
+        let bg = match status {
+            button::Status::Hovered | button::Status::Pressed => lighten(s.danger, 0.06),
+            _ => s.danger,
+        };
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: Color::WHITE,
+            border: Border {
+                radius: 9.0.into(),
+                ..Border::default()
+            },
+            ..button::Style::default()
+        }
+    })
+    .into()
+}
+
 /// Outlined/ghost button (icon + label).
 fn ghost_button<'a>(s: Skin, src: &'static str, lbl: &str, msg: Message) -> Element<'a, Message> {
     button(
@@ -1275,6 +1758,27 @@ fn meta_dot<'a>(color: Color) -> Element<'a, Message> {
         .into()
 }
 
+/// Make a string safe to use as a file name: keep alphanumerics, space, dash and
+/// underscore; collapse everything else to '_'. Falls back to "collection".
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "collection".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::from_rgb8(r, g, b)
 }
@@ -1351,6 +1855,11 @@ const I_GRIP: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 
 const I_CHEV_UP: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>"#;
 const I_CHEV_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
 const I_CHEV_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
+const I_CHEV_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"#;
+const I_LAYERS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg>"#;
+const I_PENCIL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>"#;
+const I_DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>"#;
+const I_UPLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>"#;
 const I_ALERT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
 const I_CHECK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"#;
 const I_X: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"#;

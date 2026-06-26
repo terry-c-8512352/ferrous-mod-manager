@@ -44,3 +44,9 @@ pub enum FileOperationError {
     #[error("JSON Error: {0}")]
     SerialisationError(#[from] serde_json::Error),
 }
+
+#[derive(Error, Debug)]
+pub enum LaunchError {
+    #[error("Could not start the game launcher: {0}")]
+    Spawn(#[from] std::io::Error),
+}

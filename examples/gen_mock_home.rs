@@ -37,8 +37,7 @@ fn main() {
     }
 
     write_libraryfolders_vdf(&home);
-    let mod_dir = home
-        .join(".local/share/Paradox Interactive/Stellaris/mod");
+    let mod_dir = home.join(".local/share/Paradox Interactive/Stellaris/mod");
     fs::create_dir_all(&mod_dir).expect("create mod dir");
 
     for m in mods() {
@@ -48,7 +47,10 @@ fn main() {
     let abs = fs::canonicalize(&home).expect("canonicalize mock home");
     println!("Mock $HOME ready at: {}", abs.display());
     println!("\nTry it:");
-    println!("  HOME={} cargo run --example mock_smoke -p ferrous-mod-manager", abs.display());
+    println!(
+        "  HOME={} cargo run --example mock_smoke -p ferrous-mod-manager",
+        abs.display()
+    );
     println!("  HOME={} cargo run -p app-ui", abs.display());
 }
 
@@ -110,7 +112,10 @@ fn mods() -> Vec<MockMod> {
             files: &[
                 ("interface/topbar.gui", "# tweaked topbar layout\n"),
                 ("gfx/interface/icons/buttons.dds", "fake-dds-bytes\n"),
-                ("localisation/english/l_english.yml", "l_english:\n msg_hello:0 \"Hi\"\n"),
+                (
+                    "localisation/english/l_english.yml",
+                    "l_english:\n msg_hello:0 \"Hi\"\n",
+                ),
             ],
         },
         MockMod {
@@ -138,7 +143,10 @@ fn mods() -> Vec<MockMod> {
                 ("common/defines/00_defines.txt", "NGameplay = { FOO = 2 }\n"),
                 ("common/planet_classes/pd_classes.txt", "pc_gaia = { }\n"),
                 // Conflicts with UI Overhaul on localisation (low severity).
-                ("localisation/english/l_english.yml", "l_english:\n msg_hello:0 \"Hello\"\n"),
+                (
+                    "localisation/english/l_english.yml",
+                    "l_english:\n msg_hello:0 \"Hello\"\n",
+                ),
             ],
         },
         MockMod {
