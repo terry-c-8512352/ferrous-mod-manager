@@ -179,6 +179,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a real Steam install: detect_games() reads live Steam paths"]
     fn test_apply_mod_collection_for_game() {
         let games = detector::detect_games().unwrap();
         let game = games.iter().find(|g| g.game_name == "Stellaris").unwrap();
