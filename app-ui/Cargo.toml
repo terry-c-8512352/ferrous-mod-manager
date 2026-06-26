@@ -5,6 +5,12 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# Ship the binary under the product name (release artifacts, `which`, etc.).
+# `cargo run -p app-ui` still works — this only renames the output file.
+[[bin]]
+name = "ferrous-mod-manager"
+path = "src/main.rs"
+
 # `default` keeps the wgpu (GPU) renderer for the shipped app. Building with
 # `--no-default-features` drops wgpu and leaves only tiny-skia, iced's CPU
 # renderer — needed for headless capture under Xvfb, where the software-GL
