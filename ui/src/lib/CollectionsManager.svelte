@@ -134,6 +134,7 @@
 
 <div class="manager">
   <div class="manager-header">
+    <button class="btn-back" onclick={onback}>←&nbsp; Back to mods</button>
     <h2>Mod Collections</h2>
     {#if someChecked}
       <button class="btn-delete-sel" onclick={deleteSelected}>
@@ -252,6 +253,24 @@
     font-weight: 600;
     color: var(--text-h);
     flex: 1;
+  }
+
+  .btn-back {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-h);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 12px;
+    white-space: nowrap;
+  }
+
+  .btn-back:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+    color: var(--accent);
   }
 
   .btn-action {
