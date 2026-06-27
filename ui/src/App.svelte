@@ -420,6 +420,22 @@
         saveCollection(col);
     }
 
+    // Apply the active collection to dlc_load.json without launching.
+    function applyCollection() {
+        const game = games.find((g) => g.app_id === selectedGameId);
+        if (!game || !activeCollection) return;
+        invoke("apply_mod_collection", {
+            game,
+            modCollection: activeCollection,
+        })
+            .then(() => {
+                successMessage = `Applied "${activeCollection.name}" to ${game.game_name}`;
+            })
+            .catch((err) => {
+                errorMessage = `Failed to apply: ${err}`;
+            });
+    }
+
     // Apply the active collection to dlc_load.json, then launch via Steam.
     function launchGame() {
         const game = games.find((g) => g.app_id === selectedGameId);
@@ -440,9 +456,6 @@
 
 <div class="app-shell">
     <div class="title-bar">
-        <div class="logo">F</div>
-        <span class="product">Ferrous</span>
-        <span class="title-divider"></span>
         <GameSelector {games} {selectedGameId} onselect={switchGame} />
         <span class="title-spacer"></span>
         <ThemeToggle />
@@ -467,6 +480,7 @@
             onsearch={(v) => (search = v)}
             onselect={switchCollection}
             oncollections={() => (view = "collections")}
+            onapply={applyCollection}
             onplay={launchGame}
         />
 
@@ -531,31 +545,6 @@
         padding: 0 14px;
         border-bottom: 1px solid var(--bd);
         background: var(--panel);
-    }
-
-    .logo {
-        width: 18px;
-        height: 18px;
-        border-radius: 5px;
-        background: var(--acc);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #fff;
-        font-size: 11px;
-        font-weight: 700;
-    }
-
-    .product {
-        font-size: 13px;
-        font-weight: 700;
-        color: var(--ink);
-    }
-
-    .title-divider {
-        width: 1px;
-        height: 14px;
-        background: var(--bd);
     }
 
     .title-spacer {

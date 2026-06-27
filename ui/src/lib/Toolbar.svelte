@@ -8,11 +8,20 @@
     onsearch: (value: string) => void;
     onselect: (name: string) => void;
     oncollections: () => void;
+    onapply: () => void;
     onplay: () => void;
   }
 
-  let { collections, activeName, search, onsearch, onselect, oncollections, onplay }: Props =
-    $props();
+  let {
+    collections,
+    activeName,
+    search,
+    onsearch,
+    onselect,
+    oncollections,
+    onapply,
+    onplay,
+  }: Props = $props();
 </script>
 
 <div class="toolbar">
@@ -39,6 +48,7 @@
   </div>
 
   <button class="btn" onclick={oncollections}>▦&nbsp; Collections</button>
+  <button class="btn" onclick={onapply}>✓&nbsp; Apply</button>
   <button class="btn play" onclick={onplay}>▶&nbsp; Play</button>
 </div>
 
