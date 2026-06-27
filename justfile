@@ -25,9 +25,10 @@ gen-mock:
 mock-smoke: gen-mock
     HOME='{{mock_home}}' cargo run --quiet --example mock_smoke -p ferrous-mod-manager
 
-# Launch the native Iced UI (app-ui crate) against the mock $HOME.
-mock-ui: gen-mock
-    HOME='{{mock_home}}' cargo run -p app-ui
+# Launch the real Tauri GUI against the mock $HOME.
+# WEBKIT_DISABLE_DMABUF_RENDERER=1 avoids a blank webview on software/!GPU stacks.
+mock-gui: gen-mock
+    HOME='{{mock_home}}' WEBKIT_DISABLE_DMABUF_RENDERER=1 cargo tauri dev
 
 # Remove the generated mock $HOME.
 clean-mock:
