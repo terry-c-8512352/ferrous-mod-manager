@@ -18,8 +18,8 @@ use iced::widget::{
     text_input,
 };
 use iced::{
-    Alignment, Background, Border, Color, Element, Length, Shadow, Subscription, Task, Theme,
-    Vector,
+    Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Subscription, Task,
+    Theme, Vector,
 };
 
 use ferrous_mod_manager::achievements::achievement_status_for_mods;
@@ -27,7 +27,7 @@ use ferrous_mod_manager::collections::{
     apply_mod_collection_for_game, create_collection_for_game, delete_collection_for_game,
     import_collection_for_game, load_or_create_collections_for_game, save_collection_for_game,
 };
-use ferrous_mod_manager::conflict::conflict_detection;
+use ferrous_mod_manager::conflict::{conflict_detection, mod_size_bytes};
 use ferrous_mod_manager::detector::{detect_games, discover_mods};
 use ferrous_mod_manager::launch::launch_game;
 use ferrous_mod_manager::models::{
@@ -64,9 +64,16 @@ fn main() -> iced::Result {
 struct Installed {
     mod_id: String,
     name: String,
-    /// Single-line secondary text (workshop id, or local mod's basename).
-    subtitle: String,
-    workshop: bool,
+    /// Bucketed category key derived from Paradox `tags` (see [`category_of`]).
+    category: &'static str,
+    /// Human-readable size on disk, e.g. "4.3 MB".
+    size_label: String,
+    /// Size in bytes (for the on-disk total).
+    size_bytes: u64,
+    /// 1-2 letter thumbnail initials.
+    initials: String,
+    /// Mod version or supported game version, prefixed "v".
+    version: String,
 }
 
 /// For a given mod: opposing-mod-name -> files they collide on (with category).
@@ -97,6 +104,23 @@ enum Screen {
     Collections,
 }
 
+/// Sidebar quick-filter for the installed list.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Nav {
+    AllMods,
+    InCollection,
+    Issues,
+}
+
+/// Resolved state of a mod in the load order, driving its status badge.
+#[derive(Clone, Copy)]
+enum StatusKind {
+    Ok,
+    Off,
+    Conflict,
+    Dep,
+}
+
 struct App {
     games: Vec<DetectedGame>,
     selected_game: usize,
@@ -115,6 +139,9 @@ struct App {
 
     // UI state.
     screen: Screen,
+    nav: Nav,
+    /// Active sidebar category filter (category key), or None for all.
+    category_filter: Option<&'static str>,
     dark: bool,
     filter: String,
     new_collection: String,
@@ -139,8 +166,9 @@ struct App {
 #[derive(Debug, Clone)]
 enum Message {
     SelectGame(String),
-    SelectCollection(String),
     SelectCollectionAt(usize),
+    SetNav(Nav),
+    SetCategory(&'static str),
     OpenCollections,
     CloseCollections,
     NewCollectionChanged(String),
@@ -157,18 +185,10 @@ enum Message {
     FilterChanged(String),
     AddToCollection(String),
     RemoveFromCollection(String),
-    ToggleEnabled(usize),
-    MoveUp(usize),
-    MoveDown(usize),
     DragStart(usize),
     DragEnterRow(usize),
     DragEnd,
     ToggleExpanded(usize),
-    EnableAll,
-    DisableAll,
-    AddAll,
-    RemoveAll,
-    Apply,
     Launch,
     DismissToast,
     Tick(Instant),
@@ -201,7 +221,9 @@ impl App {
             selected_collection: 0,
             conflicts: HashMap::new(),
             screen: Screen::Main,
-            dark: true,
+            nav: Nav::AllMods,
+            category_filter: None,
+            dark: false,
             filter: String::new(),
             new_collection: String::new(),
             renaming: None,
@@ -267,23 +289,22 @@ impl App {
             .iter()
             .map(|d| {
                 let mod_id = d.mod_id().to_string();
-                let workshop = d.remote_file_id.is_some();
-                // Keep the secondary line short and single-line so installed
-                // rows have a uniform height (required by virtualization):
-                // workshop id verbatim, local mods reduced to their basename.
-                let subtitle = if workshop {
-                    format!("#{mod_id}")
-                } else {
-                    std::path::Path::new(&mod_id)
-                        .file_name()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| mod_id.clone())
-                };
+                let name = d.name.clone().unwrap_or_else(|| "<unnamed>".into());
+                let size_bytes = d.path.as_deref().map(mod_size_bytes).unwrap_or(0);
+                let version = d
+                    .version
+                    .clone()
+                    .or_else(|| d.supported_version.clone())
+                    .map(|v| format!("v{}", v.trim_start_matches('v')))
+                    .unwrap_or_default();
                 Installed {
+                    initials: initials_of(&name),
+                    category: category_of(d.tags.as_deref()),
+                    size_label: human_size(size_bytes),
+                    size_bytes,
+                    version,
                     mod_id,
-                    name: d.name.clone().unwrap_or_else(|| "<unnamed>".into()),
-                    subtitle,
-                    workshop,
+                    name,
                 }
             })
             .collect();
@@ -371,13 +392,6 @@ impl App {
                     self.load_game();
                 }
             }
-            Message::SelectCollection(name) => {
-                if let Some(i) = self.collections.iter().position(|c| c.name == name) {
-                    self.selected_collection = i;
-                    self.expanded = None;
-                    self.recompute_conflicts();
-                }
-            }
             Message::NewCollectionChanged(v) => self.new_collection = v,
             Message::CreateCollection => {
                 let name = self.new_collection.trim().to_string();
@@ -405,6 +419,19 @@ impl App {
                     self.expanded = None;
                     self.recompute_conflicts();
                 }
+            }
+            Message::SetNav(nav) => {
+                self.nav = nav;
+                self.installed_scroll = 0.0;
+            }
+            Message::SetCategory(key) => {
+                // Toggle the category filter off if it's already active.
+                self.category_filter = if self.category_filter == Some(key) {
+                    None
+                } else {
+                    Some(key)
+                };
+                self.installed_scroll = 0.0;
             }
             Message::OpenCollections => {
                 self.renaming = None;
@@ -567,32 +594,6 @@ impl App {
                 self.expanded = None;
                 self.save_active();
             }
-            Message::ToggleEnabled(i) => {
-                if let Some(c) = self.collections.get_mut(self.selected_collection)
-                    && let Some(e) = c.mods.get_mut(i)
-                {
-                    e.enabled = !e.enabled;
-                }
-                self.save_active();
-            }
-            Message::MoveUp(i) => {
-                if i > 0
-                    && let Some(c) = self.collections.get_mut(self.selected_collection)
-                {
-                    c.mods.swap(i, i - 1);
-                    self.expanded = None;
-                    self.save_active();
-                }
-            }
-            Message::MoveDown(i) => {
-                if let Some(c) = self.collections.get_mut(self.selected_collection)
-                    && i + 1 < c.mods.len()
-                {
-                    c.mods.swap(i, i + 1);
-                    self.expanded = None;
-                    self.save_active();
-                }
-            }
             Message::DragStart(i) => self.dragging = Some(i),
             Message::DragEnterRow(j) => {
                 if let Some(i) = self.dragging
@@ -614,60 +615,6 @@ impl App {
                 } else {
                     Some(i)
                 };
-            }
-            Message::EnableAll => {
-                if let Some(c) = self.collections.get_mut(self.selected_collection) {
-                    for e in &mut c.mods {
-                        e.enabled = true;
-                    }
-                }
-                self.save_active();
-            }
-            Message::DisableAll => {
-                if let Some(c) = self.collections.get_mut(self.selected_collection) {
-                    for e in &mut c.mods {
-                        e.enabled = false;
-                    }
-                }
-                self.save_active();
-            }
-            Message::AddAll => {
-                let ids: Vec<String> = self.installed.iter().map(|m| m.mod_id.clone()).collect();
-                if let Some(c) = self.collections.get_mut(self.selected_collection) {
-                    let existing: HashSet<String> =
-                        c.mods.iter().map(|m| m.mod_id.clone()).collect();
-                    for id in ids {
-                        if !existing.contains(&id) {
-                            c.mods.push(ModEntry {
-                                mod_id: id,
-                                enabled: true,
-                            });
-                        }
-                    }
-                }
-                self.save_active();
-            }
-            Message::RemoveAll => {
-                if let Some(c) = self.collections.get_mut(self.selected_collection) {
-                    c.mods.clear();
-                }
-                self.expanded = None;
-                self.save_active();
-            }
-            Message::Apply => {
-                let game = &self.games[self.selected_game];
-                if let Some(c) = self.collections.get(self.selected_collection) {
-                    self.toast = Some(match apply_mod_collection_for_game(game, c) {
-                        Ok(()) => Toast {
-                            message: format!("Applied \"{}\" to {}", c.name, game.game_name),
-                            kind: ToastKind::Success,
-                        },
-                        Err(e) => Toast {
-                            message: format!("Apply failed: {e}"),
-                            kind: ToastKind::Error,
-                        },
-                    });
-                }
             }
             Message::Launch => {
                 let game = &self.games[self.selected_game];
@@ -746,52 +693,55 @@ impl App {
     }
 
     fn main_screen(&self, s: Skin) -> Element<'_, Message> {
-        let mut content = column![self.top_bar(s), divider(s.border)].spacing(16);
-
-        let main = row![self.installed_pane(s), self.collection_pane(s)]
-            .spacing(16)
-            .height(Length::Fill);
-        // Catch the pointer release anywhere in the work area so a drag-reorder
+        // Catch a pointer release anywhere in the work area so a drag-reorder
         // ends even if the cursor left the row it started on.
-        content = content.push(mouse_area(main).on_release(Message::DragEnd));
+        let body =
+            container(mouse_area(self.body(s)).on_release(Message::DragEnd)).height(Length::Fill);
+
+        let mut col = column![
+            self.title_bar(s),
+            divider(s.border),
+            self.toolbar(s),
+            divider(s.border),
+            body,
+        ]
+        .spacing(0);
 
         if let Some(t) = &self.toast {
-            content = content.push(toast_banner(s, t, self.toast_age));
+            col = col.push(container(toast_banner(s, t, self.toast_age)).padding([6, 12]));
         }
-        content = content.push(self.status_bar(s));
+        col = col.push(divider(s.border));
+        col = col.push(self.footer(s));
 
-        container(content)
-            .padding(24)
+        container(col)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(move |_: &Theme| bg_style(s.bg))
             .into()
     }
 
-    fn top_bar(&self, s: Skin) -> Element<'_, Message> {
+    /// Identity bar: logo, product name, game selector, theme toggle.
+    fn title_bar(&self, s: Skin) -> Element<'_, Message> {
+        let logo = container(label("F".into(), 11.0, Weight::Bold, Color::WHITE))
+            .center_x(Length::Fixed(18.0))
+            .center_y(Length::Fixed(18.0))
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(s.primary)),
+                border: Border {
+                    radius: 5.0.into(),
+                    ..Border::default()
+                },
+                ..container::Style::default()
+            });
+
         let game_names: Vec<String> = self.games.iter().map(|g| g.game_name.clone()).collect();
         let current_game = self
             .games
             .get(self.selected_game)
             .map(|g| g.game_name.clone());
         let game_sel = pick_list(game_names, current_game, Message::SelectGame)
-            .text_size(14.0)
-            .padding([7, 11]);
-
-        let col_names: Vec<String> = self.collections.iter().map(|c| c.name.clone()).collect();
-        let current_col = self
-            .collections
-            .get(self.selected_collection)
-            .map(|c| c.name.clone());
-        let col_sel = pick_list(col_names, current_col, Message::SelectCollection)
-            .placeholder("No collections")
-            .text_size(14.0)
-            .padding([7, 11]);
-
-        let manage_btn = ghost_button(s, I_LAYERS, "Manage", Message::OpenCollections);
-
-        let apply_btn = primary_button(s, I_CHECK, "Apply", Message::Apply);
-        let launch_btn = ghost_button(s, I_PLAY, "Launch", Message::Launch);
+            .text_size(13.0)
+            .padding([5, 10]);
 
         let (theme_icon, theme_lbl) = if self.dark {
             (I_MOON, "Dark")
@@ -800,60 +750,201 @@ impl App {
         };
         let theme_btn = ghost_button(s, theme_icon, theme_lbl, Message::ToggleTheme);
 
-        row![
-            game_sel,
+        let r = row![
+            logo,
+            label("Ferrous".into(), 13.0, Weight::Bold, s.text),
             vsep(s.border),
-            col_sel,
-            manage_btn,
+            game_sel,
             Space::with_width(Length::Fill),
-            apply_btn,
-            launch_btn,
             theme_btn,
         ]
+        .spacing(11)
+        .align_y(Alignment::Center);
+
+        container(r)
+            .center_y(Length::Fixed(48.0))
+            .width(Length::Fill)
+            .padding([0, 14])
+            .style(move |_: &Theme| bg_style(s.surface_sunken))
+            .into()
+    }
+
+    /// Toolbar: playset chips, search, Collections, Play.
+    fn toolbar(&self, s: Skin) -> Element<'_, Message> {
+        let mut chips = row![label("PLAYSET".into(), 10.0, Weight::Bold, s.faint)].spacing(9);
+        for (i, c) in self.collections.iter().enumerate() {
+            chips = chips.push(playset_chip(
+                s,
+                &c.name,
+                i == self.selected_collection,
+                Message::SelectCollectionAt(i),
+            ));
+        }
+        let chips = chips.align_y(Alignment::Center);
+
+        let search = text_input("Search mods…", &self.filter)
+            .on_input(Message::FilterChanged)
+            .padding([7, 11])
+            .size(13.0)
+            .width(Length::Fixed(220.0));
+
+        let collections_btn = ghost_button(s, I_LAYERS, "Collections", Message::OpenCollections);
+        let play_btn = primary_button(s, I_PLAY, "Play", Message::Launch);
+
+        let r = row![
+            chips,
+            Space::with_width(Length::Fill),
+            search,
+            collections_btn,
+            play_btn,
+        ]
         .spacing(9)
-        .align_y(Alignment::Center)
+        .align_y(Alignment::Center);
+
+        container(r)
+            .center_y(Length::Fixed(56.0))
+            .width(Length::Fill)
+            .padding([0, 16])
+            .style(move |_: &Theme| bg_style(s.surface))
+            .into()
+    }
+
+    /// Three-column work area: sidebar · installed · load order.
+    fn body(&self, s: Skin) -> Element<'_, Message> {
+        row![
+            self.sidebar(s),
+            vrule(s.border),
+            self.installed_col(s),
+            vrule(s.border),
+            self.loadorder_col(s),
+        ]
+        .height(Length::Fill)
         .into()
     }
 
-    fn installed_pane(&self, s: Skin) -> Element<'_, Message> {
-        let in_collection: HashSet<&str> = match self.collections.get(self.selected_collection) {
+    /// Left rail: nav quick-filters + category filters.
+    fn sidebar(&self, s: Skin) -> Element<'_, Message> {
+        let in_coll: HashSet<&str> = match self.collections.get(self.selected_collection) {
+            Some(c) => c.mods.iter().map(|m| m.mod_id.as_str()).collect(),
+            None => HashSet::new(),
+        };
+        let total = self.installed.len();
+        let in_coll_count = self
+            .installed
+            .iter()
+            .filter(|m| in_coll.contains(m.mod_id.as_str()))
+            .count();
+        let issues_count = self
+            .installed
+            .iter()
+            .filter(|m| self.conflicts.contains_key(&m.name))
+            .count();
+
+        let nav = column![
+            side_row(
+                s,
+                None,
+                "All Mods",
+                total,
+                self.nav == Nav::AllMods,
+                Message::SetNav(Nav::AllMods)
+            ),
+            side_row(
+                s,
+                None,
+                "In Collection",
+                in_coll_count,
+                self.nav == Nav::InCollection,
+                Message::SetNav(Nav::InCollection)
+            ),
+            side_row(
+                s,
+                None,
+                "Issues",
+                issues_count,
+                self.nav == Nav::Issues,
+                Message::SetNav(Nav::Issues)
+            ),
+        ]
+        .spacing(2);
+
+        let mut counts: HashMap<&'static str, usize> = HashMap::new();
+        for m in &self.installed {
+            *counts.entry(m.category).or_default() += 1;
+        }
+        let mut cats = column![
+            container(label("CATEGORIES".into(), 10.0, Weight::Bold, s.faint)).padding(Padding {
+                top: 2.0,
+                right: 10.0,
+                bottom: 5.0,
+                left: 10.0,
+            })
+        ]
+        .spacing(2);
+        for &key in CATEGORY_ORDER {
+            let c = counts.get(key).copied().unwrap_or(0);
+            if c == 0 {
+                continue;
+            }
+            let (lbl, color, _) = cat_meta(key);
+            cats = cats.push(side_row(
+                s,
+                Some(color),
+                lbl,
+                c,
+                self.category_filter == Some(key),
+                Message::SetCategory(key),
+            ));
+        }
+
+        container(scrollable(column![nav, cats].spacing(16)).height(Length::Fill))
+            .width(Length::Fixed(210.0))
+            .height(Length::Fill)
+            .padding([13, 12])
+            .style(move |_: &Theme| bg_style(s.surface_sunken))
+            .into()
+    }
+
+    /// Middle column: the thin installed-mods list (virtualized).
+    fn installed_col(&self, s: Skin) -> Element<'_, Message> {
+        let in_coll: HashSet<&str> = match self.collections.get(self.selected_collection) {
             Some(c) => c.mods.iter().map(|m| m.mod_id.as_str()).collect(),
             None => HashSet::new(),
         };
         let needle = self.filter.to_lowercase();
-
-        let header = row![
-            label("Installed".into(), 15.0, Weight::Semibold, s.text),
-            label(
-                format!("{}", self.installed.len()),
-                12.0,
-                Weight::Medium,
-                s.faint
-            ),
-            Space::with_width(Length::Fill),
-            ghost_button(s, I_PLUS, "Add all", Message::AddAll),
-            ghost_button(s, I_MINUS, "Remove all", Message::RemoveAll),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-
-        let search = text_input("Filter mods…", &self.filter)
-            .on_input(Message::FilterChanged)
-            .padding([8, 11])
-            .size(13.0);
-
-        // Virtualize: only build the rows inside (and just around) the viewport,
-        // padding above/below with fixed-height spacers so the scrollbar and
-        // offsets behave as if the whole list were present.
         let filtered: Vec<&Installed> = self
             .installed
             .iter()
             .filter(|m| {
-                needle.is_empty()
+                let q = needle.is_empty()
                     || m.name.to_lowercase().contains(&needle)
-                    || m.mod_id.to_lowercase().contains(&needle)
+                    || m.mod_id.to_lowercase().contains(&needle);
+                let cat = self.category_filter.is_none_or(|k| m.category == k);
+                let nav = match self.nav {
+                    Nav::AllMods => true,
+                    Nav::InCollection => in_coll.contains(m.mod_id.as_str()),
+                    Nav::Issues => self.conflicts.contains_key(&m.name),
+                };
+                q && cat && nav
             })
             .collect();
+
+        let header = container(
+            row![
+                label("INSTALLED".into(), 11.0, Weight::Bold, s.muted),
+                label(
+                    format!("{} mods", self.installed.len()),
+                    11.0,
+                    Weight::Medium,
+                    s.faint
+                ),
+            ]
+            .spacing(7)
+            .align_y(Alignment::Center),
+        )
+        .padding([11, 14]);
+
+        // Virtualize: only build rows in (and just around) the viewport.
         let n = filtered.len();
         let row_h = INSTALLED_ROW_H;
         let first =
@@ -865,11 +956,15 @@ impl App {
 
         let mut list = column![Space::with_height(Length::Fixed(top_pad))].spacing(0);
         for m in &filtered[first..end] {
-            let added = in_collection.contains(m.mod_id.as_str());
+            let added = in_coll.contains(m.mod_id.as_str());
             list = list.push(
-                container(self.installed_row(s, m, added))
-                    .center_y(Length::Fixed(row_h))
-                    .clip(true),
+                column![
+                    container(self.installed_row(s, m, added))
+                        .center_y(Length::Fixed(row_h - 1.0))
+                        .clip(true),
+                    divider(s.surface_sunken),
+                ]
+                .height(Length::Fixed(row_h)),
             );
         }
         list = list.push(Space::with_height(Length::Fixed(bottom_pad)));
@@ -877,83 +972,79 @@ impl App {
         let body = scrollable(list)
             .height(Length::Fill)
             .on_scroll(|vp| Message::InstalledScrolled(vp.absolute_offset().y, vp.bounds().height));
-        pane(s, column![header, search, body].spacing(12))
-    }
 
-    fn installed_row(&self, s: Skin, m: &Installed, added: bool) -> Element<'_, Message> {
-        let source = if m.workshop {
-            pill_plain("workshop", s.primary)
-        } else {
-            pill_plain("local", s.muted)
-        };
-
-        let ach: Element<'_, Message> = match self.achievement_ok.get(&m.mod_id) {
-            Some(false) => pill_icon(I_X, "ironman".into(), s.warn),
-            Some(true) => pill_icon(I_CHECK, "ironman".into(), s.success),
-            None => Space::with_width(0).into(),
-        };
-
-        let toggle = if added {
-            soft_icon_button(
-                s,
-                I_MINUS,
-                Message::RemoveFromCollection(m.mod_id.clone()),
-                s.danger,
-            )
-        } else {
-            soft_icon_button(
-                s,
-                I_PLUS,
-                Message::AddToCollection(m.mod_id.clone()),
-                s.success,
-            )
-        };
-
-        let main = row![
-            column![
-                label(m.name.clone(), 14.0, Weight::Semibold, s.text)
-                    .wrapping(text::Wrapping::None),
-                label(m.subtitle.clone(), 11.5, Weight::Normal, s.faint)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(2)
-            .width(Length::Fill),
-            ach,
-            source,
-            toggle,
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center)
-        .padding([9, 12]);
-
-        container(main)
-            .style(move |_: &Theme| card_style(s, false))
+        container(column![header, divider(s.border), body])
+            .width(Length::Fixed(312.0))
+            .height(Length::Fill)
+            .style(move |_: &Theme| bg_style(s.surface))
             .into()
     }
 
-    fn collection_pane(&self, s: Skin) -> Element<'_, Message> {
-        let active = self.collections.get(self.selected_collection);
-        let name = active.map(|c| c.name.clone()).unwrap_or_default();
-        let count = active.map(|c| c.mods.len()).unwrap_or(0);
+    fn installed_row(&self, s: Skin, m: &Installed, added: bool) -> Element<'_, Message> {
+        let (cat_label, _, _) = cat_meta(m.category);
+        let issue: Element<'_, Message> = if self.conflicts.contains_key(&m.name) {
+            dot_el(s.danger, 7.0)
+        } else {
+            Space::with_width(0).into()
+        };
+        let toggle_msg = if added {
+            Message::RemoveFromCollection(m.mod_id.clone())
+        } else {
+            Message::AddToCollection(m.mod_id.clone())
+        };
 
-        let header = row![
-            label(
-                if name.is_empty() {
-                    "Collection".into()
-                } else {
-                    name
-                },
-                15.0,
-                Weight::Semibold,
-                s.text
-            ),
-            label(format!("{count} mods"), 12.0, Weight::Medium, s.faint),
-            Space::with_width(Length::Fill),
-            ghost_button(s, I_CHECK, "Enable all", Message::EnableAll),
-            ghost_button(s, I_X, "Disable all", Message::DisableAll),
+        row![
+            thumbnail(&m.initials, m.category, 26.0, 10.0),
+            column![
+                label(m.name.clone(), 12.5, Weight::Semibold, s.text)
+                    .wrapping(text::Wrapping::None),
+                label(
+                    format!("{cat_label} · {}", m.size_label),
+                    10.5,
+                    Weight::Normal,
+                    s.faint
+                )
+                .wrapping(text::Wrapping::None),
+            ]
+            .spacing(1)
+            .width(Length::Fill),
+            issue,
+            check_toggle(s, added, toggle_msg),
         ]
-        .spacing(8)
-        .align_y(Alignment::Center);
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .padding([8, 14])
+        .into()
+    }
+
+    /// Right column: the active collection as an ordered, annotated load order.
+    fn loadorder_col(&self, s: Skin) -> Element<'_, Message> {
+        let active = self.collections.get(self.selected_collection);
+        let enabled_count = active
+            .map(|c| c.mods.iter().filter(|m| m.enabled).count())
+            .unwrap_or(0);
+
+        let header = container(
+            row![
+                label("LOAD ORDER".into(), 11.0, Weight::Bold, s.muted),
+                label(
+                    format!("{enabled_count} active"),
+                    11.0,
+                    Weight::Medium,
+                    s.faint
+                ),
+                Space::with_width(Length::Fill),
+                label(
+                    "resolves top to bottom · drag to reorder".into(),
+                    11.0,
+                    Weight::Normal,
+                    s.faint
+                ),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .padding([11, 16]);
 
         let body: Element<'_, Message> = match active {
             Some(c) if !c.mods.is_empty() => {
@@ -962,14 +1053,41 @@ impl App {
                     .iter()
                     .map(|m| (m.mod_id.as_str(), m))
                     .collect();
-                let mut list = column![].spacing(8);
+                // Names that are installed, and names enabled in this collection.
+                let installed_names: HashSet<&str> =
+                    self.installed.iter().map(|m| m.name.as_str()).collect();
+                let enabled_names: HashSet<&str> = c
+                    .mods
+                    .iter()
+                    .filter(|m| m.enabled)
+                    .filter_map(|m| by_id.get(m.mod_id.as_str()).map(|i| i.name.as_str()))
+                    .collect();
+                let deps_by_id: HashMap<&str, &Vec<String>> = self
+                    .descriptors
+                    .iter()
+                    .filter_map(|d| d.dependencies.as_ref().map(|deps| (d.mod_id(), deps)))
+                    .collect();
+
+                let mut list = column![].spacing(0);
+                let mut load_no = 0usize;
                 for (i, entry) in c.mods.iter().enumerate() {
-                    list = list.push(self.collection_row(s, i, entry, &by_id));
+                    if entry.enabled {
+                        load_no += 1;
+                    }
+                    let no = entry.enabled.then_some(load_no);
+                    let name = by_id
+                        .get(entry.mod_id.as_str())
+                        .map(|m| m.name.as_str())
+                        .unwrap_or(entry.mod_id.as_str());
+                    let (kind, badge, issue) =
+                        self.mod_status(entry, name, &deps_by_id, &installed_names, &enabled_names);
+                    list =
+                        list.push(self.loadorder_row(s, i, entry, &by_id, no, kind, badge, issue));
                 }
                 scrollable(list).height(Length::Fill).into()
             }
             _ => container(label(
-                "Add mods from the left, or create a collection.".into(),
+                "No mods in this collection — enable some from the left.".into(),
                 13.0,
                 Weight::Normal,
                 s.faint,
@@ -978,118 +1096,147 @@ impl App {
             .into(),
         };
 
-        pane(s, column![header, body].spacing(12))
+        container(column![header, divider(s.border), body])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_: &Theme| bg_style(s.surface_sunken))
+            .into()
     }
 
-    fn collection_row(
+    /// Classify one load-order entry: badge kind, badge text, and issue text.
+    fn mod_status(
+        &self,
+        entry: &ModEntry,
+        name: &str,
+        deps_by_id: &HashMap<&str, &Vec<String>>,
+        installed_names: &HashSet<&str>,
+        enabled_names: &HashSet<&str>,
+    ) -> (StatusKind, &'static str, Option<String>) {
+        if self.conflicts.contains_key(name) {
+            let with = self
+                .conflicts
+                .get(name)
+                .and_then(|c| c.keys().next().cloned())
+                .unwrap_or_default();
+            return (
+                StatusKind::Conflict,
+                "Conflict",
+                Some(format!("Conflicts with {with}")),
+            );
+        }
+        if let Some(deps) = deps_by_id.get(entry.mod_id.as_str()) {
+            for dep in deps.iter() {
+                if !installed_names.contains(dep.as_str()) {
+                    return (
+                        StatusKind::Dep,
+                        "Missing dep",
+                        Some(format!("Requires {dep} — not installed")),
+                    );
+                }
+                if entry.enabled && !enabled_names.contains(dep.as_str()) {
+                    return (
+                        StatusKind::Dep,
+                        "Needs dep",
+                        Some(format!("Requires {dep} — currently disabled")),
+                    );
+                }
+            }
+        }
+        if entry.enabled {
+            (StatusKind::Ok, "Enabled", None)
+        } else {
+            (StatusKind::Off, "Disabled", None)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn loadorder_row(
         &self,
         s: Skin,
         i: usize,
         entry: &ModEntry,
         by_id: &HashMap<&str, &Installed>,
+        load_no: Option<usize>,
+        kind: StatusKind,
+        badge: &'static str,
+        issue: Option<String>,
     ) -> Element<'_, Message> {
         let dragging = self.dragging == Some(i);
         let expanded = self.expanded == Some(i);
-        let name = by_id
-            .get(entry.mod_id.as_str())
+        let inst = by_id.get(entry.mod_id.as_str()).copied();
+        let name = inst
             .map(|m| m.name.clone())
             .unwrap_or_else(|| entry.mod_id.clone());
+        let category = inst.map(|m| m.category).unwrap_or("other");
+        let initials = inst
+            .map(|m| m.initials.clone())
+            .unwrap_or_else(|| initials_of(&name));
+        let version = inst.map(|m| m.version.clone()).unwrap_or_default();
+        let (cat_label, cat_color, cat_bg) = cat_meta(category);
 
-        let handle = mouse_area(icon(I_GRIP, 16.0, s.icon))
+        let handle = mouse_area(icon(I_GRIP, 16.0, s.faint))
             .on_press(Message::DragStart(i))
             .interaction(iced::mouse::Interaction::Grab);
 
-        let position = label(format!("{:>2}", i + 1), 13.0, Weight::Medium, s.faint);
-        let enabled = checkbox("", entry.enabled)
-            .on_toggle(move |_| Message::ToggleEnabled(i))
-            .size(17);
+        let number: Element<'_, Message> = match load_no {
+            Some(n) => container(label(format!("{n:02}"), 12.0, Weight::Semibold, s.primary))
+                .width(Length::Fixed(20.0))
+                .into(),
+            None => container(label("—".into(), 12.0, Weight::Normal, s.faint))
+                .width(Length::Fixed(20.0))
+                .into(),
+        };
 
         let name_color = if entry.enabled { s.text } else { s.faint };
-        let title = label(name.clone(), 15.0, Weight::Semibold, name_color);
-        let mod_id = label(format!("#{}", entry.mod_id), 12.0, Weight::Normal, s.faint);
-
-        let ach: Element<'_, Message> = match self.achievement_ok.get(&entry.mod_id) {
-            Some(false) => {
-                let cats: Vec<&str> = self
-                    .achievement_categories
-                    .get(&entry.mod_id)
-                    .map(|v| v.iter().map(|c| category_label(*c)).collect())
-                    .unwrap_or_default();
-                pill_icon(I_X, format!("ironman · {}", cats.join(", ")), s.warn)
-            }
-            Some(true) => pill_icon(I_CHECK, "ironman".into(), s.success),
-            None => Space::with_width(0).into(),
-        };
-
-        let conflict_cell: Element<'_, Message> = match self.conflicts.get(&name) {
-            Some(c) if !c.is_empty() => {
-                let files: usize = c.values().map(|v| v.len()).sum();
-                let color = severity_color(s, worst_severity(c));
-                button(
-                    row![
-                        icon(I_ALERT, 13.0, color),
-                        label(format!("{files} conflicts"), 12.0, Weight::Medium, color),
-                        icon(
-                            if expanded { I_CHEV_DOWN } else { I_CHEV_RIGHT },
-                            12.0,
-                            color
-                        ),
-                    ]
-                    .spacing(5)
-                    .align_y(Alignment::Center),
-                )
-                .padding([4, 9])
-                .on_press(Message::ToggleExpanded(i))
-                .style(move |_: &Theme, status| {
-                    let a = match status {
-                        button::Status::Hovered | button::Status::Pressed => 0.24,
-                        _ => 0.14,
-                    };
-                    button::Style {
-                        background: Some(Background::Color(alpha(color, a))),
-                        text_color: color,
-                        border: Border {
-                            radius: 999.0.into(),
-                            ..Border::default()
-                        },
-                        ..button::Style::default()
-                    }
-                })
-                .into()
-            }
-            _ => Space::with_width(0).into(),
-        };
-
-        let reorder = column![
-            ghost_icon_btn(s, I_CHEV_UP, Message::MoveUp(i)),
-            ghost_icon_btn(s, I_CHEV_DOWN, Message::MoveDown(i)),
+        let title_row = row![
+            label(name.clone(), 13.0, Weight::Semibold, name_color).wrapping(text::Wrapping::None),
+            chip_colored(cat_label, cat_color, cat_bg),
         ]
-        .spacing(1);
+        .spacing(7)
+        .align_y(Alignment::Center);
+
+        let mut info = column![title_row].spacing(2).width(Length::Fill);
+        if !version.is_empty() {
+            info = info.push(label(version, 11.0, Weight::Normal, s.faint));
+        }
+        if let Some(text) = &issue {
+            let color = match kind {
+                StatusKind::Conflict => s.danger,
+                _ => s.warn,
+            };
+            let banner = row![
+                icon(I_ALERT, 12.0, color),
+                label(text.clone(), 11.0, Weight::Medium, color).wrapping(text::Wrapping::None),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center);
+            // Conflicts expand to a file-level breakdown on click.
+            if matches!(kind, StatusKind::Conflict) {
+                info = info.push(
+                    mouse_area(banner)
+                        .on_press(Message::ToggleExpanded(i))
+                        .interaction(iced::mouse::Interaction::Pointer),
+                );
+            } else {
+                info = info.push(banner);
+            }
+        }
 
         let remove = ghost_icon_btn(s, I_X, Message::RemoveFromCollection(entry.mod_id.clone()));
 
-        // Stack name, location and status vertically so the ironman/conflict
-        // indicators no longer steal width from (and truncate) the name/path.
-        let has_ach = self.achievement_ok.contains_key(&entry.mod_id);
-        let has_conflict = self.conflicts.get(&name).is_some_and(|c| !c.is_empty());
-        let mut info = column![title, mod_id].spacing(3).width(Length::Fill);
-        if has_ach || has_conflict {
-            let mut status = row![].spacing(8).align_y(Alignment::Center);
-            if has_ach {
-                status = status.push(ach);
-            }
-            if has_conflict {
-                status = status.push(conflict_cell);
-            }
-            info = info.push(status);
-        }
+        let main = row![
+            handle,
+            number,
+            thumbnail(&initials, category, 30.0, 11.0),
+            info,
+            status_badge(s, kind, badge),
+            remove,
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .padding([10, 16]);
 
-        let main = row![handle, position, enabled, info, reorder, remove]
-            .spacing(13)
-            .align_y(Alignment::Center)
-            .padding([11, 14]);
-
-        let card = container(main).style(move |_: &Theme| card_style(s, dragging));
+        let card = container(main).style(move |_: &Theme| loadorder_row_style(s, dragging));
         let row_area = mouse_area(card).on_enter(Message::DragEnterRow(i));
 
         if expanded && let Some(c) = self.conflicts.get(&name) {
@@ -1098,68 +1245,102 @@ impl App {
         row_area.into()
     }
 
-    fn status_bar(&self, s: Skin) -> Element<'_, Message> {
+    fn footer(&self, s: Skin) -> Element<'_, Message> {
         let total = self.installed.len();
         let active = self.collections.get(self.selected_collection);
+        let by_id: HashMap<&str, &Installed> = self
+            .installed
+            .iter()
+            .map(|m| (m.mod_id.as_str(), m))
+            .collect();
+
         let enabled = active
             .map(|c| c.mods.iter().filter(|m| m.enabled).count())
             .unwrap_or(0);
+        let conflicts = self.conflicts.len();
 
-        let (significant, minor) = {
-            let mut sig = 0;
-            let mut min = 0;
-            for c in self.conflicts.values() {
-                match worst_severity(c) {
-                    Severity::High | Severity::Medium => sig += 1,
-                    Severity::Low => min += 1,
-                }
-            }
-            (sig, min)
-        };
-
-        let blockers = active
+        // Dependency warnings: enabled mods whose required mods are missing or
+        // not currently enabled in this collection.
+        let installed_names: HashSet<&str> =
+            self.installed.iter().map(|m| m.name.as_str()).collect();
+        let enabled_names: HashSet<&str> = active
             .map(|c| {
                 c.mods
                     .iter()
-                    .filter(|m| m.enabled && self.achievement_ok.get(&m.mod_id) == Some(&false))
+                    .filter(|m| m.enabled)
+                    .filter_map(|m| by_id.get(m.mod_id.as_str()).map(|i| i.name.as_str()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let deps_by_id: HashMap<&str, &Vec<String>> = self
+            .descriptors
+            .iter()
+            .filter_map(|d| d.dependencies.as_ref().map(|deps| (d.mod_id(), deps)))
+            .collect();
+        let dep_warn = active
+            .map(|c| {
+                c.mods
+                    .iter()
+                    .filter(|m| m.enabled)
+                    .filter_map(|m| deps_by_id.get(m.mod_id.as_str()))
+                    .flat_map(|deps| deps.iter())
+                    .filter(|d| {
+                        !installed_names.contains(d.as_str()) || !enabled_names.contains(d.as_str())
+                    })
                     .count()
             })
             .unwrap_or(0);
 
-        let game = self
-            .games
-            .get(self.selected_game)
-            .map(|g| g.game_name.as_str())
-            .unwrap_or("");
+        let storage: u64 = active
+            .map(|c| {
+                c.mods
+                    .iter()
+                    .filter(|m| m.enabled)
+                    .filter_map(|m| by_id.get(m.mod_id.as_str()))
+                    .map(|i| i.size_bytes)
+                    .sum()
+            })
+            .unwrap_or(0);
 
-        let item = |dot: Color, t: String| {
-            row![meta_dot(dot), label(t, 12.0, Weight::Medium, s.muted)]
-                .spacing(6)
-                .align_y(Alignment::Center)
+        let stat = |n: usize, lbl: &str| {
+            row![
+                label(n.to_string(), 12.0, Weight::Bold, s.text),
+                label(lbl.to_string(), 12.0, Weight::Medium, s.muted),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center)
+        };
+        let dot_stat = |dot: Color, n: usize, lbl: &str| {
+            row![
+                dot_el(dot, 7.0),
+                label(n.to_string(), 12.0, Weight::Bold, dot),
+                label(lbl.to_string(), 12.0, Weight::Medium, s.muted),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center)
         };
 
         container(
             row![
-                item(s.primary, format!("{enabled}/{total} enabled")),
-                item(s.danger, format!("{significant} significant conflicts")),
-                item(s.info, format!("{minor} minor conflicts")),
-                item(s.warn, format!("{blockers} achievement blockers")),
+                stat(total, "installed"),
+                stat(enabled, "enabled"),
+                dot_stat(s.danger, conflicts, "conflicts"),
+                dot_stat(s.warn, dep_warn, "dependency warnings"),
                 Space::with_width(Length::Fill),
-                label(game.to_string(), 12.0, Weight::Semibold, s.faint),
+                label(
+                    format!("{} on disk", human_size(storage)),
+                    12.0,
+                    Weight::Medium,
+                    s.faint
+                ),
             ]
             .spacing(16)
             .align_y(Alignment::Center),
         )
-        .padding([8, 14])
-        .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(s.surface)),
-            border: Border {
-                radius: 10.0.into(),
-                width: 1.0,
-                color: s.border,
-            },
-            ..container::Style::default()
-        })
+        .center_y(Length::Fixed(44.0))
+        .width(Length::Fill)
+        .padding([0, 16])
+        .style(move |_: &Theme| bg_style(s.surface_sunken))
         .into()
     }
 
@@ -1306,23 +1487,6 @@ impl App {
 // ---------------------------------------------------------------------------
 // Standalone view helpers
 // ---------------------------------------------------------------------------
-
-fn pane<'a>(s: Skin, inner: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(inner)
-        .padding(16)
-        .width(Length::FillPortion(1))
-        .height(Length::Fill)
-        .style(move |_: &Theme| container::Style {
-            background: Some(Background::Color(s.surface_sunken)),
-            border: Border {
-                radius: 14.0.into(),
-                width: 1.0,
-                color: s.border,
-            },
-            ..container::Style::default()
-        })
-        .into()
-}
 
 /// Fade-in/out curve and slide offset for a toast of the given age (seconds).
 fn toast_anim(age: f32) -> (f32, f32) {
@@ -1510,20 +1674,6 @@ fn icon<'a>(src: &'static str, size: f32, color: Color) -> Element<'a, Message> 
         .height(Length::Fixed(size))
         .style(move |_: &Theme, _| svg::Style { color: Some(color) })
         .into()
-}
-
-fn pill_icon<'a>(icon_src: &'static str, lbl: String, color: Color) -> Element<'a, Message> {
-    container(
-        row![
-            icon(icon_src, 13.0, color),
-            label(lbl, 12.0, Weight::Medium, color),
-        ]
-        .spacing(5)
-        .align_y(Alignment::Center),
-    )
-    .padding([4, 9])
-    .style(move |_: &Theme| pill_style(color))
-    .into()
 }
 
 fn pill_plain<'a>(lbl: &str, color: Color) -> Element<'a, Message> {
@@ -1745,8 +1895,18 @@ fn vsep<'a>(color: Color) -> Element<'a, Message> {
         .into()
 }
 
-fn meta_dot<'a>(color: Color) -> Element<'a, Message> {
-    container(Space::new(Length::Fixed(5.0), Length::Fixed(5.0)))
+/// Full-height 1px vertical rule between body columns.
+fn vrule<'a>(color: Color) -> Element<'a, Message> {
+    container(Space::with_width(Length::Fixed(1.0)))
+        .width(Length::Fixed(1.0))
+        .height(Length::Fill)
+        .style(move |_: &Theme| bg_style(color))
+        .into()
+}
+
+/// Small round status/category dot.
+fn dot_el<'a>(color: Color, size: f32) -> Element<'a, Message> {
+    container(Space::new(Length::Fixed(size), Length::Fixed(size)))
         .style(move |_: &Theme| container::Style {
             background: Some(Background::Color(color)),
             border: Border {
@@ -1756,6 +1916,319 @@ fn meta_dot<'a>(color: Color) -> Element<'a, Message> {
             ..container::Style::default()
         })
         .into()
+}
+
+/// Square mod thumbnail: category-tinted background with the mod's initials.
+fn thumbnail<'a>(
+    initials: &str,
+    category: &'static str,
+    size: f32,
+    font: f32,
+) -> Element<'a, Message> {
+    let (_, color, bg) = cat_meta(category);
+    container(label(initials.to_string(), font, Weight::Bold, color))
+        .center_x(Length::Fixed(size))
+        .center_y(Length::Fixed(size))
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(bg)),
+            border: Border {
+                radius: (size * 0.23).into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// Small colored tag chip (category label in the load order).
+fn chip_colored<'a>(lbl: &str, color: Color, bg: Color) -> Element<'a, Message> {
+    container(label(lbl.to_string(), 11.0, Weight::Semibold, color))
+        .padding([2, 7])
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(bg)),
+            border: Border {
+                radius: 5.0.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// Pill status badge for a load-order row.
+fn status_badge<'a>(s: Skin, kind: StatusKind, text: &str) -> Element<'a, Message> {
+    let (color, bg) = status_colors(s, kind);
+    container(label(text.to_string(), 11.0, Weight::Semibold, color))
+        .padding([2, 9])
+        .style(move |_: &Theme| container::Style {
+            background: Some(Background::Color(bg)),
+            border: Border {
+                radius: 999.0.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+fn status_colors(s: Skin, kind: StatusKind) -> (Color, Color) {
+    match kind {
+        StatusKind::Ok => (s.success, alpha(s.success, 0.14)),
+        StatusKind::Off => (s.faint, alpha(s.faint, 0.18)),
+        StatusKind::Conflict => (s.danger, alpha(s.danger, 0.14)),
+        StatusKind::Dep => (s.warn, alpha(s.warn, 0.16)),
+    }
+}
+
+fn loadorder_row_style(s: Skin, dragging: bool) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(if dragging {
+            s.surface_hover
+        } else {
+            s.surface
+        })),
+        border: Border {
+            radius: 0.0.into(),
+            width: if dragging { 1.0 } else { 0.0 },
+            color: s.primary,
+        },
+        ..container::Style::default()
+    }
+}
+
+/// Custom enable/in-collection checkbox matching the mockup.
+fn check_toggle<'a>(s: Skin, checked: bool, msg: Message) -> Element<'a, Message> {
+    let inner: Element<'a, Message> = if checked {
+        container(icon(I_CHECK, 11.0, Color::WHITE))
+            .center_x(Length::Fixed(18.0))
+            .center_y(Length::Fixed(18.0))
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(s.primary)),
+                border: Border {
+                    radius: 5.0.into(),
+                    ..Border::default()
+                },
+                ..container::Style::default()
+            })
+            .into()
+    } else {
+        container(Space::new(Length::Fixed(18.0), Length::Fixed(18.0)))
+            .style(move |_: &Theme| container::Style {
+                background: Some(Background::Color(s.surface)),
+                border: Border {
+                    radius: 5.0.into(),
+                    width: 1.5,
+                    color: s.faint,
+                },
+                ..container::Style::default()
+            })
+            .into()
+    };
+    mouse_area(inner)
+        .on_press(msg)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into()
+}
+
+/// Top-bar playset chip (selects a collection as the active loadout).
+fn playset_chip<'a>(s: Skin, name: &str, active: bool, msg: Message) -> Element<'a, Message> {
+    let txt = if active { s.primary } else { s.muted };
+    let bg = if active {
+        alpha(s.primary, 0.12)
+    } else {
+        s.surface
+    };
+    let border = if active { s.primary } else { s.border };
+    button(label(name.to_string(), 12.0, Weight::Semibold, txt))
+        .padding([6, 13])
+        .on_press(msg)
+        .style(move |_: &Theme, st| {
+            let b = if !active && matches!(st, button::Status::Hovered) {
+                s.surface_hover
+            } else {
+                bg
+            };
+            button::Style {
+                background: Some(Background::Color(b)),
+                text_color: txt,
+                border: Border {
+                    radius: 8.0.into(),
+                    width: 1.0,
+                    color: border,
+                },
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// Sidebar nav/category row with an optional leading dot and a trailing count.
+fn side_row<'a>(
+    s: Skin,
+    dot: Option<Color>,
+    lbl: &str,
+    count: usize,
+    active: bool,
+    msg: Message,
+) -> Element<'a, Message> {
+    let txt = if active { s.primary } else { s.text };
+    let weight = if active {
+        Weight::Semibold
+    } else {
+        Weight::Medium
+    };
+    let left: Element<'a, Message> = match dot {
+        Some(c) => row![dot_el(c, 8.0), label(lbl.to_string(), 13.0, weight, txt)]
+            .spacing(9)
+            .align_y(Alignment::Center)
+            .into(),
+        None => label(lbl.to_string(), 13.0, weight, txt).into(),
+    };
+    let r = row![
+        left,
+        Space::with_width(Length::Fill),
+        label(
+            count.to_string(),
+            12.0,
+            Weight::Medium,
+            if active { s.primary } else { s.faint }
+        ),
+    ]
+    .align_y(Alignment::Center);
+    button(r)
+        .padding([7, 10])
+        .width(Length::Fill)
+        .on_press(msg)
+        .style(move |_: &Theme, st| {
+            let bg = if active {
+                Some(Background::Color(alpha(s.primary, 0.12)))
+            } else if matches!(st, button::Status::Hovered) {
+                Some(Background::Color(s.surface_hover))
+            } else {
+                None
+            };
+            button::Style {
+                background: bg,
+                text_color: txt,
+                border: Border {
+                    radius: 7.0.into(),
+                    ..Border::default()
+                },
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
+// ---------------------------------------------------------------------------
+// Mod categories (bucketed from Paradox `tags`)
+// ---------------------------------------------------------------------------
+
+const CATEGORY_ORDER: &[&str] = &[
+    "interface",
+    "gameplay",
+    "graphics",
+    "utility",
+    "audio",
+    "other",
+];
+
+/// (label, foreground color, tinted background) for a category key.
+fn cat_meta(key: &str) -> (&'static str, Color, Color) {
+    match key {
+        "interface" => ("Interface", rgb(0x2F, 0x7F, 0xD1), rgb(0xE8, 0xF1, 0xFB)),
+        "gameplay" => ("Gameplay", rgb(0x1F, 0x9D, 0x6B), rgb(0xE6, 0xF5, 0xEE)),
+        "graphics" => ("Graphics", rgb(0x7A, 0x5B, 0xD0), rgb(0xEF, 0xEA, 0xFB)),
+        "utility" => ("Utility", rgb(0x5F, 0x6B, 0x7A), rgb(0xEC, 0xEF, 0xF3)),
+        "audio" => ("Audio", rgb(0xC2, 0x87, 0x1A), rgb(0xFB, 0xF2, 0xE0)),
+        _ => ("Other", rgb(0x6C, 0x74, 0x80), rgb(0xEE, 0xF0, 0xF3)),
+    }
+}
+
+/// Bucket a mod into a display category from its Paradox tags. First match wins.
+fn category_of(tags: Option<&[String]>) -> &'static str {
+    let Some(tags) = tags else {
+        return "other";
+    };
+    for t in tags {
+        let tl = t.to_lowercase();
+        let key: &str = if tl.contains("interface") || tl.contains("tooltip") || tl == "ui" {
+            "interface"
+        } else if tl.contains("graphic")
+            || tl.contains("portrait")
+            || tl.contains("shipset")
+            || tl.contains("visual")
+            || tl.contains("namelist")
+        {
+            "graphics"
+        } else if tl.contains("sound") || tl.contains("music") || tl.contains("audio") {
+            "audio"
+        } else if tl.contains("utilit")
+            || tl.contains("fix")
+            || tl.contains("performance")
+            || tl.contains("quality")
+            || tl.contains("cheat")
+        {
+            "utility"
+        } else if tl.contains("gameplay")
+            || tl.contains("balance")
+            || tl.contains("overhaul")
+            || tl.contains("event")
+            || tl.contains("econom")
+            || tl.contains("military")
+            || tl.contains("species")
+            || tl.contains("galaxy")
+            || tl.contains("diplomac")
+            || tl.contains("technolog")
+            || tl.contains("origin")
+            || tl.contains("building")
+            || tl.contains("conversion")
+        {
+            "gameplay"
+        } else {
+            continue;
+        };
+        return key;
+    }
+    "other"
+}
+
+/// Human-readable byte size, e.g. "4.3 MB"; "—" for zero.
+fn human_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    let b = bytes as f64;
+    if bytes == 0 {
+        "—".to_string()
+    } else if b < KB {
+        format!("{bytes} B")
+    } else if b < KB * KB {
+        format!("{:.0} KB", b / KB)
+    } else if b < KB * KB * KB {
+        let mb = b / (KB * KB);
+        if mb < 10.0 {
+            format!("{mb:.1} MB")
+        } else {
+            format!("{mb:.0} MB")
+        }
+    } else {
+        format!("{:.1} GB", b / (KB * KB * KB))
+    }
+}
+
+/// 1-2 uppercase initials from a mod name for its thumbnail.
+fn initials_of(name: &str) -> String {
+    let inits: String = name
+        .split_whitespace()
+        .filter(|w| w.chars().next().is_some_and(|c| c.is_alphanumeric()))
+        .filter_map(|w| w.chars().next())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase();
+    if inits.is_empty() {
+        "M".to_string()
+    } else {
+        inits
+    }
 }
 
 /// Make a string safe to use as a file name: keep alphanumerics, space, dash and
@@ -1812,20 +2285,6 @@ fn severity_of(cat: ConflictCategory) -> Severity {
     }
 }
 
-fn worst_severity(c: &ConflictsForMod) -> Severity {
-    let mut worst = Severity::Low;
-    for files in c.values() {
-        for (_, cat) in files {
-            match severity_of(*cat) {
-                Severity::High => return Severity::High,
-                Severity::Medium => worst = Severity::Medium,
-                Severity::Low => {}
-            }
-        }
-    }
-    worst
-}
-
 fn severity_color(s: Skin, sev: Severity) -> Color {
     match sev {
         Severity::High => s.danger,
@@ -1852,9 +2311,6 @@ fn category_label(c: ConflictCategory) -> &'static str {
 // ---------------------------------------------------------------------------
 
 const I_GRIP: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg>"#;
-const I_CHEV_UP: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>"#;
-const I_CHEV_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
-const I_CHEV_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
 const I_CHEV_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"#;
 const I_LAYERS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg>"#;
 const I_PENCIL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>"#;
@@ -1864,7 +2320,6 @@ const I_ALERT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24
 const I_CHECK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"#;
 const I_X: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"#;
 const I_PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>"#;
-const I_MINUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>"#;
 const I_TRASH: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>"#;
 const I_PLAY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>"#;
 const I_MOON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>"#;
