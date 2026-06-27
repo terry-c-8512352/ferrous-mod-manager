@@ -79,8 +79,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp src-tauri/target/release/ferrous-mod-manager \
-            ferrous-mod-manager-${{ runner.os }}-x86_64
+          # Workspace target dir lives at the repo root, not under src-tauri/.
+          # tauri build renames the cargo bin (app) to productName; fall back to
+          # the raw cargo bin name in case that rename doesn't happen.
+          bin=target/release/ferrous-mod-manager
+          [ -f "$bin" ] || bin=target/release/app
+          cp "$bin" ferrous-mod-manager-${{ runner.os }}-x86_64
           gh release upload "${{ github.ref_name }}" \
             ferrous-mod-manager-${{ runner.os }}-x86_64 --clobber
 
@@ -91,7 +95,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          Copy-Item src-tauri/target/release/ferrous-mod-manager.exe `
-            ferrous-mod-manager-Windows-x86_64.exe
+          # Workspace target dir lives at the repo root, not under src-tauri/.
+          $bin = "target/release/ferrous-mod-manager.exe"
+          if (-not (Test-Path $bin)) { $bin = "target/release/app.exe" }
+          Copy-Item $bin ferrous-mod-manager-Windows-x86_64.exe
           gh release upload "${{ github.ref_name }}" `
             ferrous-mod-manager-Windows-x86_64.exe --clobber
