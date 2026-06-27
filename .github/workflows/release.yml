@@ -71,7 +71,7 @@ jobs:
       # The release-mode artifacts are already compiled by the step above, so
       # this just relinks/renames the binary to the productName — it's cheap.
       - name: Build no-bundle binary
-        run: cargo tauri build --no-bundle
+        run: tauri build --no-bundle
 
       # Upload the raw executable to the same draft release (Linux/macOS).
       - name: Attach standalone binary (Unix)
