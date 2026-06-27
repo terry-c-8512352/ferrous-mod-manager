@@ -2,7 +2,8 @@ name: Dev build (Linux)
 
 # On-demand Linux build for testing on your main PC without cutting a tag.
 # Trigger it from the Actions tab -> "Dev build (Linux)" -> "Run workflow".
-# The standalone binary is uploaded as a workflow artifact (no GitHub Release).
+# A self-contained .AppImage is uploaded as a workflow artifact (no GitHub
+# Release). The AppImage bundles WebKitGTK so it runs on any distro.
 on:
   workflow_dispatch:
 
@@ -40,21 +41,17 @@ jobs:
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli@^2
 
-      - name: Build no-bundle binary
-        run: tauri build --no-bundle
+      # Build only the AppImage bundle. The AppImage embeds WebKitGTK and the
+      # other GTK runtime libs, so it runs on any distro (incl. Arch) without
+      # installing -dev/runtime packages on the target machine.
+      - name: Build AppImage
+        run: tauri build --bundles appimage
 
-      # Workspace target dir lives at the repo root, not under src-tauri/.
-      # tauri build renames the cargo bin (app) to productName; fall back to
-      # the raw cargo bin name in case that rename doesn't happen.
-      - name: Stage binary
-        run: |
-          bin=target/release/ferrous-mod-manager
-          [ -f "$bin" ] || bin=target/release/app
-          cp "$bin" ferrous-mod-manager-Linux-x86_64
-
-      - name: Upload binary artifact
+      # Workspace target dir is at the repo root; the AppImage lands under
+      # bundle/appimage/ as <productName>_<version>_amd64.AppImage.
+      - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ferrous-mod-manager-Linux-x86_64
-          path: ferrous-mod-manager-Linux-x86_64
+          name: ferrous-mod-manager-AppImage
+          path: target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
