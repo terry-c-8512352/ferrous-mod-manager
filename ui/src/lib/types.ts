@@ -13,6 +13,7 @@ export interface ModDescriptor {
   tags?: string[];
   picture?: string;
   version?: string;
+  dependencies?: string[];
 }
 
 export interface ModEntry {

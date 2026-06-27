@@ -21,6 +21,7 @@ pub fn run() {
             delete_collection,
             create_collection,
             detect_mod_conflict,
+            mod_sizes,
             detect_achievement_compatibility,
             apply_mod_collection,
             import_collection,
@@ -83,6 +84,22 @@ fn delete_collection(game: DetectedGame, mod_collection: ModCollection) -> Resul
 #[tauri::command]
 fn detect_mod_conflict(mods: Vec<ModDescriptor>) -> Vec<ModConflict> {
     ferrous_mod_manager::conflict::conflict_detection(mods)
+}
+
+/// On-disk size (bytes) of each mod's file tree, keyed by `mod_id`. Mods without
+/// a local `path` (or whose path can't be walked) report 0.
+#[tauri::command]
+fn mod_sizes(mods: Vec<ModDescriptor>) -> HashMap<String, u64> {
+    mods.iter()
+        .map(|m| {
+            let bytes = m
+                .path
+                .as_deref()
+                .map(ferrous_mod_manager::conflict::mod_size_bytes)
+                .unwrap_or(0);
+            (m.mod_id().to_string(), bytes)
+        })
+        .collect()
 }
 
 #[tauri::command]

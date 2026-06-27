@@ -16,9 +16,21 @@
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
-  --sans: 'Public Sans', system-ui, sans-serif;
-  --heading: 'Public Sans', system-ui, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Three-column manager palette (from the canonical design mockup) */
+  --acc: #1b8ce5;
+  --acc-ink: #0c5fa0;
+  --acc-weak: #e7f3fc;
+  --ink: #1b212b;
+  --muted: #6c7480;
+  --faint: #9aa2ad;
+  --bd: #e8ebef;
+  --bd2: #f2f4f7;
+  --panel: #fbfcfd;
+  --surface: #ffffff;
+
+  --sans: 'Hanken Grotesk', system-ui, sans-serif;
+  --heading: 'Hanken Grotesk', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
 
   font: 18px/145% var(--sans);
   letter-spacing: 0.18px;
@@ -49,6 +61,16 @@
     --tertiary-bg: rgba(196, 122, 32, 0.15);
     --danger: #e05550;
     --danger-bg: rgba(224, 85, 80, 0.15);
+    --acc: #3b9eef;
+    --acc-ink: #7cc4f5;
+    --acc-weak: rgba(59, 158, 239, 0.14);
+    --ink: #e4e7ee;
+    --muted: #9aa2ad;
+    --faint: #6c7480;
+    --bd: #2a2d35;
+    --bd2: #23262d;
+    --panel: #1a1c21;
+    --surface: #16181c;
     --shadow:
       rgba(0, 0, 0, 0.45) 0 10px 15px -3px, rgba(0, 0, 0, 0.3) 0 4px 6px -2px;
   }
@@ -67,6 +89,16 @@
   --tertiary-bg: rgba(196, 122, 32, 0.15);
   --danger: #e05550;
   --danger-bg: rgba(224, 85, 80, 0.15);
+  --acc: #3b9eef;
+  --acc-ink: #7cc4f5;
+  --acc-weak: rgba(59, 158, 239, 0.14);
+  --ink: #e4e7ee;
+  --muted: #9aa2ad;
+  --faint: #6c7480;
+  --bd: #2a2d35;
+  --bd2: #23262d;
+  --panel: #1a1c21;
+  --surface: #16181c;
   --shadow:
     rgba(0, 0, 0, 0.45) 0 10px 15px -3px, rgba(0, 0, 0, 0.3) 0 4px 6px -2px;
   color-scheme: dark;
