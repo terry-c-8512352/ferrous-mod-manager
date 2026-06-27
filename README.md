@@ -1,6 +1,6 @@
 # Ferrous Mod Manager
 
-A native Linux mod manager for Paradox Interactive games, built with Rust and [Iced](https://iced.rs/).
+A native Linux mod manager for Paradox Interactive games, built with Rust and Tauri.
 
 ## Supported Games
 
@@ -27,6 +27,8 @@ A native Linux mod manager for Paradox Interactive games, built with Rust and [I
 #### Prerequisites
 
 - [Rust](https://rustup.rs/) (stable toolchain)
+- [Node.js](https://nodejs.org/) (v18+)
+- [Tauri prerequisites for Linux](https://v2.tauri.app/start/prerequisites/#linux):
 - Steam (for game detection and launching)
 
 #### Build & Run
@@ -36,12 +38,17 @@ A native Linux mod manager for Paradox Interactive games, built with Rust and [I
 git clone https://github.com/terry-c-8512352/ferrous-mod-manager.git
 cd ferrous-mod-manager
 
+# Install frontend dependencies
+cd ui && npm install && cd ..
+
 # Run in dev mode
-cargo run -p app-ui
+WEBKIT_DISABLE_DMABUF_RENDERER=1 cargo tauri dev
 
 # Build for release
-cargo build --release -p app-ui
+cargo tauri build
 ```
+
+> **Note:** The `WEBKIT_DISABLE_DMABUF_RENDERER=1` env var is needed on some Wayland systems to prevent rendering issues.
 
 #### Run Tests
 
@@ -61,7 +68,8 @@ cargo fmt -- --check
 | Layer | Language | Role |
 |-------|----------|------|
 | Core library | Rust (`src/`) | Game detection, mod parsing, conflict analysis, load order I/O |
-| UI | Rust + Iced (`app-ui/`) | Native desktop window: mod lists, drag-and-drop ordering, conflict visualization |
+| Tauri shell | Rust (`src-tauri/`) | Desktop window, IPC bridge between core and frontend |
+| UI | Svelte + TypeScript (`ui/`) | Mod lists, drag-and-drop ordering, conflict visualization |
 
 ## Contributing
 
