@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { DecoratedMod } from './catalog';
 
   interface Props {
@@ -14,13 +15,52 @@
   let dragIndex = $state<number | null>(null);
   let overIndex = $state<number | null>(null);
 
+  // Edge auto-scroll: while a drag is near the top/bottom of the list, scroll
+  // it so off-screen rows can be reached (rows are tall, few fit on screen).
+  let listEl: HTMLDivElement;
+  let scrollVel = 0;
+  let rafId = 0;
+  const EDGE = 56; // px from each edge that triggers scrolling
+  const MAX_SPEED = 14; // px per frame at the very edge
+
+  function scrollTick() {
+    if (scrollVel !== 0 && listEl) listEl.scrollTop += scrollVel;
+    rafId = requestAnimationFrame(scrollTick);
+  }
+
+  function startAutoScroll() {
+    if (!rafId) rafId = requestAnimationFrame(scrollTick);
+  }
+
+  function stopAutoScroll() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    scrollVel = 0;
+  }
+
+  function updateScrollVel(clientY: number) {
+    const rect = listEl.getBoundingClientRect();
+    if (clientY < rect.top + EDGE) {
+      const f = (rect.top + EDGE - clientY) / EDGE;
+      scrollVel = -Math.ceil(Math.min(1, f) * MAX_SPEED);
+    } else if (clientY > rect.bottom - EDGE) {
+      const f = (clientY - (rect.bottom - EDGE)) / EDGE;
+      scrollVel = Math.ceil(Math.min(1, f) * MAX_SPEED);
+    } else {
+      scrollVel = 0;
+    }
+  }
+
   function handleDrop(to: number) {
     const from = dragIndex;
     dragIndex = null;
     overIndex = null;
+    stopAutoScroll();
     if (from === null || from === to) return;
     onmove(from, to);
   }
+
+  onDestroy(stopAutoScroll);
 </script>
 
 <div class="col">
@@ -30,7 +70,15 @@
     <span class="spacer"></span>
     <span class="hint">resolves top → bottom · ⇅ drag to reorder</span>
   </div>
-  <div class="list">
+  <div
+    class="list"
+    bind:this={listEl}
+    ondragover={(e) => {
+      e.preventDefault();
+      if (dragIndex !== null) updateScrollVel(e.clientY);
+    }}
+    role="list"
+  >
     {#each mods as mod, i (mod.mod_id)}
       <div
         class="row"
@@ -42,10 +90,12 @@
           // WebKitGTK requires drag data for `drop` to fire at all.
           e.dataTransfer?.setData('text/plain', String(i));
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+          startAutoScroll();
         }}
         ondragend={() => {
           dragIndex = null;
           overIndex = null;
+          stopAutoScroll();
         }}
         ondragover={(e) => {
           e.preventDefault();
