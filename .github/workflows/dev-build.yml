@@ -1,0 +1,60 @@
+name: Dev build (Linux)
+
+# On-demand Linux build for testing on your main PC without cutting a tag.
+# Trigger it from the Actions tab -> "Dev build (Linux)" -> "Run workflow".
+# The standalone binary is uploaded as a workflow artifact (no GitHub Release).
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build standalone binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri v2 needs the WebKitGTK/GLib stack at build time on Linux.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Frontend deps for the tauri beforeBuildCommand (`cd ../ui && npm run build`).
+      - name: Install frontend dependencies
+        run: npm --prefix ui ci
+
+      # `tauri build` needs the Tauri v2 CLI; install the `tauri` binary from npm.
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@^2
+
+      - name: Build no-bundle binary
+        run: tauri build --no-bundle
+
+      # Workspace target dir lives at the repo root, not under src-tauri/.
+      # tauri build renames the cargo bin (app) to productName; fall back to
+      # the raw cargo bin name in case that rename doesn't happen.
+      - name: Stage binary
+        run: |
+          bin=target/release/ferrous-mod-manager
+          [ -f "$bin" ] || bin=target/release/app
+          cp "$bin" ferrous-mod-manager-Linux-x86_64
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrous-mod-manager-Linux-x86_64
+          path: ferrous-mod-manager-Linux-x86_64
+          if-no-files-found: error
