@@ -3,6 +3,18 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Total size in bytes of every file under a mod's directory (best-effort;
+/// unreadable entries are skipped). Used to show per-mod and on-disk size.
+pub fn mod_size_bytes(path: &str) -> u64 {
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum()
+}
+
 fn scan_mods(mod_list: Vec<ModDescriptor>) -> HashMap<PathBuf, Vec<String>> {
     let mut file_map: HashMap<PathBuf, Vec<String>> = HashMap::new();
     for game_mod in mod_list {

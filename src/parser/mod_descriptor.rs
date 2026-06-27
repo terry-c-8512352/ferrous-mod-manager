@@ -80,6 +80,10 @@ pub fn parse_mod_file(input: &str) -> Result<ModDescriptor, ModParseError> {
             ("tags", ModValue::List(list)) => {
                 mod_descriptor.tags = Some(list.into_iter().map(|f| f.to_string()).collect())
             }
+            ("dependencies", ModValue::List(list)) => {
+                mod_descriptor.dependencies =
+                    Some(list.into_iter().map(|f| f.to_string()).collect())
+            }
             _ => {
                 log::warn!("Unknown field in mod descriptor: {}", item.0);
             } // TODO: Probs raise an error here? Probably means we have an unexpected field?

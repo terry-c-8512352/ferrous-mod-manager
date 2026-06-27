@@ -23,6 +23,13 @@ struct MockMod {
     slug: &'static str,
     name: &'static str,
     remote_file_id: Option<&'static str>,
+    /// Paradox `tags` — drives the UI's category bucketing (interface/gameplay/…).
+    tags: &'static [&'static str],
+    /// Mod `version` string (shown in the load order); empty to omit.
+    version: &'static str,
+    /// Paradox `dependencies` — other mods (by display name) this one requires.
+    /// Drives the UI's "Missing dep" / "Needs dep" warnings.
+    dependencies: &'static [&'static str],
     files: &'static [ModFile],
 }
 
@@ -89,6 +96,23 @@ fn write_mod(mod_dir: &Path, m: MockMod) {
 
     let mut descriptor = format!("name=\"{}\"\n", m.name);
     descriptor.push_str("supported_version=\"v4.2.*\"\n");
+    if !m.version.is_empty() {
+        descriptor.push_str(&format!("version=\"{}\"\n", m.version));
+    }
+    if !m.tags.is_empty() {
+        descriptor.push_str("tags={\n");
+        for tag in m.tags {
+            descriptor.push_str(&format!("\t\"{tag}\"\n"));
+        }
+        descriptor.push_str("}\n");
+    }
+    if !m.dependencies.is_empty() {
+        descriptor.push_str("dependencies={\n");
+        for dep in m.dependencies {
+            descriptor.push_str(&format!("\t\"{dep}\"\n"));
+        }
+        descriptor.push_str("}\n");
+    }
     descriptor.push_str(&format!("path=\"{}\"\n", abs_content.display()));
     if let Some(id) = m.remote_file_id {
         descriptor.push_str(&format!("remote_file_id=\"{id}\"\n"));
@@ -109,6 +133,9 @@ fn mods() -> Vec<MockMod> {
             slug: "ui_overhaul_dynamic",
             name: "UI Overhaul Dynamic",
             remote_file_id: None,
+            tags: &["User Interface", "Tooltip"],
+            version: "3.2.1",
+            dependencies: &[],
             files: &[
                 ("interface/topbar.gui", "# tweaked topbar layout\n"),
                 ("gfx/interface/icons/buttons.dds", "fake-dds-bytes\n"),
@@ -122,12 +149,18 @@ fn mods() -> Vec<MockMod> {
             slug: "more_events",
             name: "More Events Mod",
             remote_file_id: None,
+            tags: &["Events", "Gameplay"],
+            version: "3.5",
+            dependencies: &["Expanded Diplomacy"],
             files: &[("events/extra_events.txt", "namespace = extra\n")],
         },
         MockMod {
             slug: "gigastructures",
             name: "Gigastructural Engineering",
             remote_file_id: None,
+            tags: &["Gameplay", "Buildings", "Military"],
+            version: "1.8",
+            dependencies: &[],
             files: &[
                 ("common/defines/00_defines.txt", "NGameplay = { FOO = 1 }\n"),
                 ("common/buildings/megastructures.txt", "ring_world = { }\n"),
@@ -138,6 +171,9 @@ fn mods() -> Vec<MockMod> {
             slug: "planetary_diversity",
             name: "Planetary Diversity",
             remote_file_id: None,
+            tags: &["Species", "Planet Modifiers", "Gameplay"],
+            version: "4.0",
+            dependencies: &[],
             files: &[
                 // Conflicts with gigastructures on common/defines (Defines = high).
                 ("common/defines/00_defines.txt", "NGameplay = { FOO = 2 }\n"),
@@ -153,6 +189,9 @@ fn mods() -> Vec<MockMod> {
             slug: "workshop_shipset",
             name: "Workshop Cosmetic Shipset",
             remote_file_id: Some("2890123456"),
+            tags: &["Graphics", "Ships", "Sound"],
+            version: "2.1",
+            dependencies: &[],
             files: &[
                 ("gfx/models/ships/cruiser.mesh", "fake-mesh\n"),
                 ("sound/effects/engine.wav", "fake-wav\n"),
