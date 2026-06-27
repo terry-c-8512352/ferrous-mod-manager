@@ -37,13 +37,19 @@
         class:disabled={!mod.enabled}
         class:drop-target={overIndex === i && dragIndex !== null && dragIndex !== i}
         draggable="true"
-        ondragstart={() => (dragIndex = i)}
+        ondragstart={(e) => {
+          dragIndex = i;
+          // WebKitGTK requires drag data for `drop` to fire at all.
+          e.dataTransfer?.setData('text/plain', String(i));
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+        }}
         ondragend={() => {
           dragIndex = null;
           overIndex = null;
         }}
         ondragover={(e) => {
           e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
           overIndex = i;
         }}
         ondragleave={() => {
