@@ -26,15 +26,15 @@
 
 <div class="toolbar">
   <span class="label">PLAYSET</span>
-  {#each collections as col (col.id)}
-    <button
-      class="chip"
-      class:active={col.name === activeName}
-      onclick={() => onselect(col.name)}
-    >
-      {col.name}
-    </button>
-  {/each}
+  <select
+    class="playset"
+    value={activeName}
+    onchange={(e) => onselect((e.target as HTMLSelectElement).value)}
+  >
+    {#each collections as col (col.id)}
+      <option value={col.name}>{col.name}</option>
+    {/each}
+  </select>
 
   <span class="spacer"></span>
 
@@ -71,23 +71,26 @@
     margin-right: 2px;
   }
 
-  .chip {
-    padding: 6px 13px;
+  .playset {
+    padding: 6px 28px 6px 13px;
     border-radius: 8px;
     border: 1px solid var(--bd);
-    background: var(--surface);
-    color: var(--muted);
+    background: var(--acc-weak);
+    color: var(--acc-ink);
     font-family: inherit;
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%231b8ce5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 11px center;
   }
 
-  .chip.active {
+  .playset:focus {
+    outline: none;
     border-color: var(--acc);
-    background: var(--acc-weak);
-    color: var(--acc-ink);
   }
 
   .spacer {

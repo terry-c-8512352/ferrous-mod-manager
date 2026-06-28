@@ -1,18 +1,24 @@
 <script lang="ts">
-  import { CATEGORY_ORDER, catMeta, type CategoryKey } from './catalog';
-
   type NavKey = 'all' | 'enabled' | 'conflicts';
+
+  // A tag filter derived from the installed mods' Paradox tags. `color` is the
+  // dot colour borrowed from the tag's display category bucket.
+  export interface TagFilter {
+    tag: string;
+    count: number;
+    color: string;
+  }
 
   interface Props {
     counts: { all: number; enabled: number; issues: number };
-    categoryCounts: Record<CategoryKey, number>;
+    tags: TagFilter[];
     activeNav: NavKey;
-    activeCategory: CategoryKey | null;
+    activeTag: string | null;
     onnav: (key: NavKey) => void;
-    oncategory: (key: CategoryKey) => void;
+    ontag: (tag: string) => void;
   }
 
-  let { counts, categoryCounts, activeNav, activeCategory, onnav, oncategory }: Props = $props();
+  let { counts, tags, activeNav, activeTag, onnav, ontag }: Props = $props();
 
   const navItems: { key: NavKey; label: string; count: number }[] = $derived([
     { key: 'all', label: 'All Mods', count: counts.all },
@@ -32,19 +38,21 @@
   </div>
 
   <div class="group">
-    <div class="heading">CATEGORIES</div>
-    {#each CATEGORY_ORDER as key (key)}
-      {@const meta = catMeta(key)}
+    <div class="heading">TAGS</div>
+    {#if tags.length === 0}
+      <div class="empty">No tags</div>
+    {/if}
+    {#each tags as t (t.tag)}
       <button
         class="cat-row"
-        class:active={activeCategory === key}
-        onclick={() => oncategory(key)}
+        class:active={activeTag === t.tag}
+        onclick={() => ontag(t.tag)}
       >
         <span class="cat-label">
-          <span class="dot" style="background:{meta.color}"></span>
-          {meta.label}
+          <span class="dot" style="background:{t.color}"></span>
+          {t.tag}
         </span>
-        <span class="count">{categoryCounts[key] ?? 0}</span>
+        <span class="count">{t.count}</span>
       </button>
     {/each}
   </div>
@@ -75,6 +83,12 @@
     letter-spacing: 0.06em;
     color: var(--faint);
     padding: 2px 10px 5px;
+  }
+
+  .empty {
+    font-size: 12px;
+    color: var(--faint);
+    padding: 4px 10px;
   }
 
   .nav-row,
@@ -117,6 +131,7 @@
     display: flex;
     align-items: center;
     gap: 9px;
+    text-transform: capitalize;
   }
 
   .dot {

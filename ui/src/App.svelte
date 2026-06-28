@@ -19,10 +19,10 @@
     import {
         decorateMod,
         categoryOf,
+        catMeta,
         humanSize,
         type DecorateContext,
         type DecoratedMod,
-        type CategoryKey,
     } from "./lib/catalog";
     import { invoke } from "@tauri-apps/api/core";
 
@@ -118,7 +118,7 @@
     // Sidebar / toolbar filter state (drives the installed column only).
     let search = $state("");
     let nav = $state<"all" | "enabled" | "conflicts">("all");
-    let categoryFilter = $state<CategoryKey | null>(null);
+    let tagFilter = $state<string | null>(null);
 
     const collections = $derived(collectionsByGame[selectedGameId] ?? []);
     const activeCollection = $derived(
@@ -230,7 +230,7 @@
         const q = search.trim().toLowerCase();
         return decoratedInstalled.filter((d) => {
             if (q && !d.name.toLowerCase().includes(q)) return false;
-            if (categoryFilter && d.category !== categoryFilter) return false;
+            if (tagFilter && !d.tags.includes(tagFilter)) return false;
             if (nav === "enabled" && !d.enabled) return false;
             if (nav === "conflicts" && !d.hasIssue) return false;
             return true;
@@ -243,17 +243,23 @@
         (activeCollection?.mods ?? []).filter((m) => m.enabled).length,
     );
 
-    const categoryCounts = $derived.by(() => {
-        const c: Record<CategoryKey, number> = {
-            interface: 0,
-            gameplay: 0,
-            graphics: 0,
-            utility: 0,
-            audio: 0,
-            other: 0,
-        };
-        for (const m of installedMods) c[categoryOf(m.tags)]++;
-        return c;
+    // Sidebar filters generated from the installed mods' Paradox tags. Each
+    // distinct tag becomes a filter row; the dot colour is borrowed from the
+    // tag's display-category bucket. Sorted by frequency, then alphabetically.
+    const tagFilters = $derived.by(() => {
+        const counts = new Map<string, number>();
+        for (const m of installedMods) {
+            for (const t of m.tags ?? []) {
+                counts.set(t, (counts.get(t) ?? 0) + 1);
+            }
+        }
+        return [...counts.entries()]
+            .map(([tag, count]) => ({
+                tag,
+                count,
+                color: catMeta(categoryOf([tag])).color,
+            }))
+            .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
     });
 
     // Unique unordered pairs of enabled mods that collide on at least one file.
@@ -280,11 +286,11 @@
         return n;
     });
 
+    // Total on-disk size of every installed mod, independent of which are
+    // enabled — computed as soon as sizes load, not as mods are turned on.
     const storageLabel = $derived.by(() => {
         let total = 0;
-        for (const e of activeCollection?.mods ?? []) {
-            if (e.enabled) total += modSizes.get(e.mod_id) ?? 0;
-        }
+        for (const m of installedMods) total += modSizes.get(m.mod_id) ?? 0;
         return humanSize(total);
     });
 
@@ -519,12 +525,11 @@
         <div class="body">
             <Sidebar
                 counts={navCounts}
-                {categoryCounts}
+                tags={tagFilters}
                 activeNav={nav}
-                activeCategory={categoryFilter}
+                activeTag={tagFilter}
                 onnav={(k) => (nav = k)}
-                oncategory={(k) =>
-                    (categoryFilter = categoryFilter === k ? null : k)}
+                ontag={(t) => (tagFilter = tagFilter === t ? null : t)}
             />
             <InstalledList
                 mods={visibleInstalled}
