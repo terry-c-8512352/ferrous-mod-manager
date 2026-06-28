@@ -33,12 +33,12 @@ pub fn launch_game(game: &DetectedGame) -> Result<(), LaunchError> {
 /// the install root or under `binaries/`, alongside the launcher we skip.
 fn game_binary_candidates(app_id: u32) -> &'static [&'static str] {
     match app_id {
-        281990 => &["stellaris"],                         // Stellaris
-        236850 => &["eu4"],                               // Europa Universalis IV
-        394360 => &["hoi4"],                              // Hearts of Iron IV
-        1158310 => &["binaries/ck3", "ck3"],              // Crusader Kings III
-        529340 => &["binaries/victoria3", "victoria3"],   // Victoria 3
-        859580 => &["binaries/imperator", "imperator"],   // Imperator: Rome
+        281990 => &["stellaris"],                       // Stellaris
+        236850 => &["eu4"],                             // Europa Universalis IV
+        394360 => &["hoi4"],                            // Hearts of Iron IV
+        1158310 => &["binaries/ck3", "ck3"],            // Crusader Kings III
+        529340 => &["binaries/victoria3", "victoria3"], // Victoria 3
+        859580 => &["binaries/imperator", "imperator"], // Imperator: Rome
         _ => &[],
     }
 }
@@ -126,7 +126,8 @@ mod tests {
     #[test]
     fn returns_none_for_unknown_game() {
         // The Stellaris binary exists here, but the app id isn't a known game.
-        let resolved = resolve_game_binary(&game(999999, "tests/fixtures/launch/stellaris_install"));
+        let resolved =
+            resolve_game_binary(&game(999999, "tests/fixtures/launch/stellaris_install"));
         assert_eq!(resolved, None);
     }
 }
