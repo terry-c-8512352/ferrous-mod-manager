@@ -83,6 +83,38 @@
     let selectedCollectionName = $state("");
     let view = $state<"main" | "collections">("main");
 
+    // Width (px) of the Installed column. The Load Order column is flex:1, so
+    // dragging the divider between them resizes both. Persisted across sessions.
+    const INSTALLED_WIDTH_KEY = "installedColumnWidth";
+    const INSTALLED_WIDTH_MIN = 240;
+    const INSTALLED_WIDTH_MAX = 720;
+    function clampWidth(px: number) {
+        return Math.min(INSTALLED_WIDTH_MAX, Math.max(INSTALLED_WIDTH_MIN, px));
+    }
+    let installedWidth = $state(
+        clampWidth(Number(localStorage.getItem(INSTALLED_WIDTH_KEY)) || 312),
+    );
+
+    function startResize(event: PointerEvent) {
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = installedWidth;
+        const onMove = (e: PointerEvent) => {
+            installedWidth = clampWidth(startWidth + (e.clientX - startX));
+        };
+        const onUp = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            localStorage.setItem(INSTALLED_WIDTH_KEY, String(installedWidth));
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+    }
+
     // Sidebar / toolbar filter state (drives the installed column only).
     let search = $state("");
     let nav = $state<"all" | "enabled" | "conflicts">("all");
@@ -497,8 +529,16 @@
             <InstalledList
                 mods={visibleInstalled}
                 total={installedMods.length}
+                width={installedWidth}
                 ontoggle={toggleModInCollection}
             />
+            <div
+                class="col-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize installed mods column"
+                onpointerdown={startResize}
+            ></div>
             <LoadOrder
                 mods={decoratedCollection}
                 {enabledCount}
@@ -555,5 +595,22 @@
         flex: 1;
         display: flex;
         min-height: 0;
+    }
+
+    /* Drag handle sitting between the Installed and Load Order columns.
+       Narrow hit target with a wider invisible grab area via margin. */
+    .col-resizer {
+        flex: none;
+        width: 5px;
+        margin: 0 -2px;
+        cursor: col-resize;
+        background: transparent;
+        z-index: 1;
+        transition: background 0.12s ease;
+    }
+
+    .col-resizer:hover,
+    .col-resizer:active {
+        background: var(--accent, #4a8cff);
     }
 </style>
