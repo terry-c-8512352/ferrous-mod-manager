@@ -4,13 +4,14 @@
   interface Props {
     mods: DecoratedMod[];
     total: number;
+    width: number;
     ontoggle: (modId: string) => void;
   }
 
-  let { mods, total, ontoggle }: Props = $props();
+  let { mods, total, width, ontoggle }: Props = $props();
 </script>
 
-<div class="col">
+<div class="col" style="width:{width}px">
   <div class="col-header">
     <span class="title">INSTALLED</span>
     <span class="sub">{total} mods</span>
@@ -45,7 +46,6 @@
 
 <style>
   .col {
-    width: 312px;
     flex: none;
     display: flex;
     flex-direction: column;

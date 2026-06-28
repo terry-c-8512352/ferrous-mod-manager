@@ -15,6 +15,41 @@
   let dragIndex = $state<number | null>(null);
   let overIndex = $state<number | null>(null);
 
+  // Row index whose load-number input is being edited. While editing, that row
+  // is made non-draggable so the text field stays focusable/typable (a draggable
+  // ancestor otherwise swallows input interaction under WebKitGTK).
+  let editIndex = $state<number | null>(null);
+
+  // Array indices of the enabled mods, in order. The visible load number N maps
+  // to enabledOrder[N - 1] — the collection-array index onmove expects.
+  const enabledOrder = $derived.by(() => {
+    const out: number[] = [];
+    mods.forEach((m, i) => {
+      if (m.enabled) out.push(i);
+    });
+    return out;
+  });
+
+  // Commit a typed load number: move the row so it becomes the Nth enabled mod.
+  // Invalid / out-of-range input reverts the field to the current value.
+  function commitLoadNo(from: number, input: HTMLInputElement) {
+    const target = Number(input.value.trim());
+    if (
+      !Number.isInteger(target) ||
+      target < 1 ||
+      target > enabledOrder.length
+    ) {
+      input.value = mods[from]?.loadNo ?? '';
+      return;
+    }
+    const to = enabledOrder[target - 1];
+    if (to === from) {
+      input.value = mods[from].loadNo;
+      return;
+    }
+    onmove(from, to);
+  }
+
   // Edge auto-scroll: while a drag is near the top/bottom of the list, scroll
   // it so off-screen rows can be reached (rows are tall, few fit on screen).
   let listEl: HTMLDivElement;
@@ -68,7 +103,7 @@
     <span class="title">LOAD ORDER</span>
     <span class="sub">{enabledCount} active</span>
     <span class="spacer"></span>
-    <span class="hint">resolves top → bottom · ⇅ drag to reorder</span>
+    <span class="hint">resolves top → bottom · drag or type # to reorder</span>
   </div>
   <div
     class="list"
@@ -84,7 +119,7 @@
         class="row"
         class:disabled={!mod.enabled}
         class:drop-target={overIndex === i && dragIndex !== null && dragIndex !== i}
-        draggable="true"
+        draggable={editIndex === i ? 'false' : 'true'}
         ondragstart={(e) => {
           dragIndex = i;
           // WebKitGTK requires drag data for `drop` to fire at all.
@@ -112,7 +147,29 @@
         role="listitem"
       >
         <span class="grip">⋮⋮</span>
-        <span class="load-no">{mod.loadNo}</span>
+        <input
+          class="load-no"
+          type="text"
+          inputmode="numeric"
+          value={mod.loadNo}
+          disabled={!mod.enabled}
+          title="Type a position to move this mod"
+          aria-label="Load position for {mod.name}"
+          onpointerdown={() => (editIndex = i)}
+          onfocus={() => (editIndex = i)}
+          onblur={(e) => {
+            commitLoadNo(i, e.currentTarget);
+            editIndex = null;
+          }}
+          onkeydown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur();
+            } else if (e.key === 'Escape') {
+              e.currentTarget.value = mod.loadNo;
+              e.currentTarget.blur();
+            }
+          }}
+        />
         <div class="thumb" style="background:{mod.catBg};color:{mod.catColor}">{mod.initials}</div>
         <div class="meta">
           <div class="name-line">
@@ -234,8 +291,32 @@
     font-size: 12px;
     color: var(--acc-ink);
     font-weight: 600;
-    width: 18px;
+    width: 24px;
     flex: none;
+    /* Render as plain text until hovered/focused. */
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    text-align: center;
+    padding: 1px 0;
+    cursor: text;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  .load-no:hover:not(:disabled) {
+    border-color: var(--bd);
+  }
+
+  .load-no:focus {
+    outline: none;
+    border-color: var(--acc);
+    background: var(--surface);
+  }
+
+  .load-no:disabled {
+    color: var(--faint);
+    cursor: default;
   }
 
   .thumb {

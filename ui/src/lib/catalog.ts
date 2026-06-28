@@ -149,6 +149,7 @@ export interface DecoratedMod {
   mod_id: string;
   name: string;
   version: string; // "v1.2" or ""
+  tags: string[]; // raw Paradox tags, drives the sidebar tag filter
   category: CategoryKey;
   catLabel: string;
   catColor: string;
@@ -243,6 +244,7 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
     mod_id: mod.mod_id,
     name,
     version: mod.version ? `v${mod.version}` : '',
+    tags: mod.tags ?? [],
     category: cat,
     catLabel: meta.label,
     catColor: meta.color,

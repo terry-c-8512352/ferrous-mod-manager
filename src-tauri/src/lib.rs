@@ -119,8 +119,12 @@ fn import_collection(game: DetectedGame, path: PathBuf) -> Result<ModCollection,
     import_collection_for_game(game.app_id, &path).map_err(|e| e.to_string())
 }
 
-/// Launch the game through Steam (`steam://run/<app_id>`).
+/// Launch the game's executable directly, falling back to `steam://run/<app_id>`.
+/// On success the manager window minimizes to get out of the way of the game.
 #[tauri::command]
-fn launch(game: DetectedGame) -> Result<(), String> {
-    ferrous_mod_manager::launch::launch_game(game.app_id).map_err(|e| e.to_string())
+fn launch(window: tauri::Window, game: DetectedGame) -> Result<(), String> {
+    ferrous_mod_manager::launch::launch_game(&game).map_err(|e| e.to_string())?;
+    // Best-effort: a failed minimize shouldn't fail the launch.
+    let _ = window.minimize();
+    Ok(())
 }
