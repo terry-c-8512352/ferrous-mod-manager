@@ -43,6 +43,12 @@ pub enum FileOperationError {
 
     #[error("JSON Error: {0}")]
     SerialisationError(#[from] serde_json::Error),
+
+    #[error("Game detection failed: {0}")]
+    Detection(#[from] DetectionError),
+
+    #[error("No installed game with app id {0}")]
+    UnknownGame(u32),
 }
 
 #[derive(Error, Debug)]

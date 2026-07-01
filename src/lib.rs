@@ -1,8 +1,10 @@
 pub mod achievements;
 pub mod collections;
 pub mod conflict;
+pub mod dependency;
 pub mod detector;
 pub mod errors;
+pub mod fsutil;
 pub mod launch;
 pub mod locations;
 pub mod models;

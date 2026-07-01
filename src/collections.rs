@@ -99,12 +99,30 @@ pub fn delete_collection_for_game(
     Ok(())
 }
 
+/// Apply a collection for a game identified only by its Steam app id. The
+/// game's data path is re-resolved from the local Steam install rather than
+/// trusted from the caller — this is the entry point for the IPC layer, where
+/// a compromised webview could otherwise supply an arbitrary
+/// `paradox_data_path` to write into.
+pub fn apply_mod_collection_by_app_id(
+    app_id: u32,
+    mod_collection: &ModCollection,
+) -> Result<(), FileOperationError> {
+    let games = crate::detector::detect_games()?;
+    let game = games
+        .iter()
+        .find(|g| g.app_id == app_id)
+        .ok_or(FileOperationError::UnknownGame(app_id))?;
+    apply_mod_collection_for_game(game, mod_collection)
+}
+
 pub fn apply_mod_collection_for_game(
     game: &DetectedGame,
     mod_collection: &ModCollection,
 ) -> Result<(), FileOperationError> {
     let data_path = Path::new(&game.paradox_data_path).join("dlc_load.json");
-    let dlc_load_contents = std::fs::read_to_string(&data_path)?;
+    let dlc_load_contents =
+        crate::fsutil::read_to_string_limited(&data_path, crate::fsutil::MAX_READ_BYTES)?;
     let mut dlc_load: DlcLoad = serde_json::from_str(dlc_load_contents.as_str())?;
     dlc_load.enabled_mods = Vec::new();
     for md in &mod_collection.mods {
@@ -116,7 +134,9 @@ pub fn apply_mod_collection_for_game(
     }
 
     let dlc_load_contents = serde_json::to_string_pretty(&dlc_load)?;
-    std::fs::write(&data_path, dlc_load_contents)?;
+    // Atomic replace: a crash mid-write must not leave the game with a
+    // truncated dlc_load.json.
+    crate::fsutil::write_atomic(&data_path, &dlc_load_contents)?;
     Ok(())
 }
 
