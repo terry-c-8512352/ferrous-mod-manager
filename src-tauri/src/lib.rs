@@ -1,17 +1,30 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use ferrous_mod_manager::{
     collections::{
-        create_collection_for_game, delete_collection_for_game, import_collection_for_game,
+        create_collection_for_game, delete_collection_for_game,
         load_or_create_collections_for_game, save_collection_for_game,
     },
+    dependency::DependencyReport,
+    locations::ModRoots,
     models::{AchievementStatus, DetectedGame, ModCollection, ModConflict, ModDescriptor},
 };
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Some Wayland/Nvidia systems hand WebKitGTK a DMA-BUF renderer it can't use,
+    // producing a blank or broken window. Disabling it forces a software path that
+    // works everywhere, so users no longer need to export this var before launching.
+    // Must run before any GTK/WebKit init. Honor an explicit override if the user set one.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // Safe: called at the very start of `run()`, before any threads are spawned.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             detect_games,
@@ -24,7 +37,7 @@ pub fn run() {
             mod_sizes,
             detect_achievement_compatibility,
             apply_mod_collection,
-            import_collection,
+            enable_mod_with_dependencies,
             launch
         ])
         .setup(|app| {
@@ -83,40 +96,55 @@ fn delete_collection(game: DetectedGame, mod_collection: ModCollection) -> Resul
 
 #[tauri::command]
 fn detect_mod_conflict(mods: Vec<ModDescriptor>) -> Vec<ModConflict> {
-    ferrous_mod_manager::conflict::conflict_detection(mods)
+    ferrous_mod_manager::conflict::conflict_detection(mods, &ModRoots::detect())
 }
 
 /// On-disk size (bytes) of each mod's file tree, keyed by `mod_id`. Mods without
 /// a local `path` (or whose path can't be walked) report 0.
 #[tauri::command]
 fn mod_sizes(mods: Vec<ModDescriptor>) -> HashMap<String, u64> {
-    mods.iter()
-        .map(|m| {
-            let bytes = m
-                .path
-                .as_deref()
-                .map(ferrous_mod_manager::conflict::mod_size_bytes)
-                .unwrap_or(0);
-            (m.mod_id().to_string(), bytes)
-        })
-        .collect()
+    ferrous_mod_manager::conflict::mod_sizes(&mods, &ModRoots::detect())
 }
 
 #[tauri::command]
 fn detect_achievement_compatibility(mods: Vec<ModDescriptor>) -> Vec<AchievementStatus> {
-    ferrous_mod_manager::achievements::achievement_status_for_mods(&mods)
+    ferrous_mod_manager::achievements::achievement_status_for_mods(&mods, &ModRoots::detect())
 }
 
+/// The game's data path is re-resolved from the local Steam install by app id;
+/// the frontend-supplied paths in `game` are deliberately not trusted for writes.
 #[tauri::command]
 fn apply_mod_collection(game: DetectedGame, mod_collection: ModCollection) -> Result<(), String> {
-    ferrous_mod_manager::collections::apply_mod_collection_for_game(&game, &mod_collection)
+    ferrous_mod_manager::collections::apply_mod_collection_by_app_id(game.app_id, &mod_collection)
         .map_err(|e| e.to_string())
 }
 
-/// Import a collection from a JSON file on disk into the game's collection store.
+#[derive(serde::Serialize)]
+struct EnableModOutcome {
+    collection: ModCollection,
+    report: DependencyReport,
+}
+
+/// Enable a mod in a collection together with its transitive dependencies
+/// (resolved by name against the installed mods), persist the updated
+/// collection, and report auto-enabled and missing dependencies.
 #[tauri::command]
-fn import_collection(game: DetectedGame, path: PathBuf) -> Result<ModCollection, String> {
-    import_collection_for_game(game.app_id, &path).map_err(|e| e.to_string())
+fn enable_mod_with_dependencies(
+    game: DetectedGame,
+    mut mod_collection: ModCollection,
+    mod_id: String,
+    mods: Vec<ModDescriptor>,
+) -> Result<EnableModOutcome, String> {
+    let report = ferrous_mod_manager::dependency::enable_with_dependencies(
+        &mut mod_collection,
+        &mod_id,
+        &mods,
+    );
+    save_collection_for_game(game.app_id, &mod_collection).map_err(|e| e.to_string())?;
+    Ok(EnableModOutcome {
+        collection: mod_collection,
+        report,
+    })
 }
 
 /// Launch the game's executable directly, falling back to `steam://run/<app_id>`.

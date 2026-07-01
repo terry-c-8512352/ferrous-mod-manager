@@ -11,6 +11,7 @@
     import type {
         DetectedGame,
         ModCollection,
+        EnableModOutcome,
         ModConflict,
         ModDescriptor,
         ResolvedMod,
@@ -325,22 +326,60 @@
         selectedCollectionName = name;
     }
 
+    // Enable a mod plus its transitive dependencies. The backend resolves the
+    // chain, reorders/persists the collection, and reports what it auto-enabled
+    // and which declared dependencies aren't installed.
+    function enableModWithDependencies(modId: string) {
+        const game = games.find((g) => g.app_id === selectedGameId);
+        const col = activeCollection;
+        if (!game || !col) return;
+        const modName = resolvedModMap.get(modId)?.name ?? modId;
+        invoke<EnableModOutcome>("enable_mod_with_dependencies", {
+            game,
+            modCollection: col,
+            modId,
+            mods: installedMods,
+        })
+            .then(({ collection, report }) => {
+                col.mods = collection.mods;
+                const activated = report.activated_dependencies;
+                if (report.missing.length > 0) {
+                    const detail = report.missing
+                        .map((m) => `"${m.name}" (needed by ${m.required_by})`)
+                        .join(", ");
+                    errorMessage = `Enabled "${modName}", but ${report.missing.length === 1 ? "a dependency is" : "some dependencies are"} not installed: ${detail}`;
+                } else if (activated.length > 0) {
+                    errorMessage = "";
+                    successMessage = `Enabled "${modName}" and ${activated.length === 1 ? "its dependency" : `${activated.length} dependencies`}: ${activated.join(", ")}`;
+                }
+            })
+            .catch((err) => {
+                console.error(`Failed to enable mod: ${err}`);
+                errorMessage = `Failed to enable "${modName}": ${err}`;
+            });
+    }
+
     function toggleModInCollection(modId: string) {
         if (!activeCollection) return;
         const idx = activeCollection.mods.findIndex((m) => m.mod_id === modId);
         if (idx === -1) {
-            activeCollection.mods.push({ mod_id: modId, enabled: true });
+            enableModWithDependencies(modId);
         } else {
             activeCollection.mods.splice(idx, 1);
+            saveCollection(activeCollection);
         }
-        saveCollection(activeCollection);
     }
 
     function toggleModEnabled(modId: string) {
         if (!activeCollection) return;
         const entry = activeCollection.mods.find((m) => m.mod_id === modId);
-        if (entry) entry.enabled = !entry.enabled;
-        saveCollection(activeCollection);
+        if (!entry) return;
+        if (entry.enabled) {
+            entry.enabled = false;
+            saveCollection(activeCollection);
+        } else {
+            enableModWithDependencies(modId);
+        }
     }
 
     function moveMod(from: number, to: number) {

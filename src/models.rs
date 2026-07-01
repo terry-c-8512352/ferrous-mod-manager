@@ -1,7 +1,7 @@
 use crate::errors::FileOperationError;
+use crate::fsutil::{MAX_READ_BYTES, read_to_string_limited, write_atomic};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::fs::{read_to_string, write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -157,21 +157,29 @@ impl ModCollection {
 
     pub fn save(&self, path: &Path) -> Result<(), FileOperationError> {
         let contents = serde_json::to_string_pretty(&self)?;
-        write(path, contents)?;
+        write_atomic(path, &contents)?;
         Ok(())
     }
 
     pub fn load(path: &Path) -> Result<ModCollection, FileOperationError> {
-        let contents = read_to_string(path)?;
+        let contents = read_to_string_limited(path, MAX_READ_BYTES)?;
         let mod_collection: ModCollection = serde_json::from_str(&contents)?;
         Ok(mod_collection)
     }
 }
 
+/// The game's `dlc_load.json`. Only `enabled_mods` is managed by this app;
+/// `disabled_dlcs` and any field a future game version adds are round-tripped
+/// untouched via `extra` instead of being silently dropped on write, and a
+/// file missing either known field still parses.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DlcLoad {
+    #[serde(default)]
     pub enabled_mods: Vec<String>,
+    #[serde(default)]
     pub disabled_dlcs: Vec<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -189,5 +197,31 @@ mod tests {
         assert!(&loaded_collection.is_ok());
         assert_eq!(loaded_collection.unwrap().mods[0].mod_id, mod_id);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_dlc_load_round_trip_preserves_unknown_fields() {
+        // Fields this app doesn't model (added by the game/launcher) must
+        // survive a load-modify-save cycle.
+        let input = r#"{
+            "disabled_dlcs": ["dlc/dlc001.dlc"],
+            "enabled_mods": ["mod/ugc_1.mod"],
+            "some_future_field": {"nested": true}
+        }"#;
+        let mut dlc_load: DlcLoad = serde_json::from_str(input).unwrap();
+        dlc_load.enabled_mods = vec!["mod/ugc_2.mod".to_string()];
+        let output = serde_json::to_string(&dlc_load).unwrap();
+        let round_tripped: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(round_tripped["some_future_field"]["nested"], true);
+        assert_eq!(round_tripped["disabled_dlcs"][0], "dlc/dlc001.dlc");
+        assert_eq!(round_tripped["enabled_mods"][0], "mod/ugc_2.mod");
+    }
+
+    #[test]
+    fn test_dlc_load_parses_with_missing_fields() {
+        // A dlc_load.json missing a known field must not hard-fail the apply.
+        let dlc_load: DlcLoad = serde_json::from_str("{}").unwrap();
+        assert!(dlc_load.enabled_mods.is_empty());
+        assert!(dlc_load.disabled_dlcs.is_empty());
     }
 }

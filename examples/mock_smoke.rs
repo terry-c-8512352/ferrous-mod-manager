@@ -1,10 +1,12 @@
 // Throwaway: drives the real backend pipeline against a mock $HOME so we can
 // confirm the GUI will get sensible data.
 // Run with: HOME=<mockhome> cargo run --example mock_smoke -p ferrous-mod-manager
+use ferrous_mod_manager::locations::ModRoots;
 use ferrous_mod_manager::{achievements, conflict, detector};
 
 fn main() {
     let games = detector::detect_games().expect("detect_games");
+    let mod_roots = ModRoots::detect();
     println!("Detected {} game(s):", games.len());
     for g in &games {
         println!("  - {} (app_id {})", g.game_name, g.app_id);
@@ -14,7 +16,7 @@ fn main() {
     let mods = detector::discover_mods(game);
     println!("\nDiscovered {} mod(s) in {}:", mods.len(), game.game_name);
 
-    let statuses = achievements::achievement_status_for_mods(&mods);
+    let statuses = achievements::achievement_status_for_mods(&mods, &mod_roots);
     for (m, s) in mods.iter().zip(&statuses) {
         let name = m.name.as_deref().unwrap_or("<unnamed>");
         if s.compatible {
@@ -30,7 +32,7 @@ fn main() {
     let blockers = statuses.iter().filter(|s| !s.compatible).count();
     println!("\nIronman/achievements this loadout: {blockers} mod(s) disable them");
 
-    let conflicts = conflict::conflict_detection(mods);
+    let conflicts = conflict::conflict_detection(mods, &mod_roots);
     println!("\n{} file conflict(s):", conflicts.len());
     for c in &conflicts {
         println!(

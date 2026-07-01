@@ -1,3 +1,4 @@
+use crate::locations::ModRoots;
 use crate::models::{ConflictCategory, ModConflict, ModDescriptor};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -5,7 +6,8 @@ use walkdir::WalkDir;
 
 /// Total size in bytes of every file under a mod's directory (best-effort;
 /// unreadable entries are skipped). Used to show per-mod and on-disk size.
-pub fn mod_size_bytes(path: &str) -> u64 {
+/// Callers must pass a path already validated by [`ModRoots::checked_path`].
+fn mod_size_bytes(path: &Path) -> u64 {
     WalkDir::new(path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -15,27 +17,53 @@ pub fn mod_size_bytes(path: &str) -> u64 {
         .sum()
 }
 
-fn scan_mods(mod_list: Vec<ModDescriptor>) -> HashMap<PathBuf, Vec<String>> {
+/// On-disk size (bytes) of each mod's file tree, keyed by `mod_id`. Mods
+/// without a local `path` — or whose path falls outside the allowed mod
+/// roots — report 0.
+pub fn mod_sizes(mods: &[ModDescriptor], roots: &ModRoots) -> HashMap<String, u64> {
+    mods.iter()
+        .map(|m| {
+            let bytes = m
+                .path
+                .as_deref()
+                .and_then(|p| roots.checked_path(p))
+                .map(|p| mod_size_bytes(&p))
+                .unwrap_or(0);
+            (m.mod_id().to_string(), bytes)
+        })
+        .collect()
+}
+
+fn scan_mods(mod_list: Vec<ModDescriptor>, roots: &ModRoots) -> HashMap<PathBuf, Vec<String>> {
     let mut file_map: HashMap<PathBuf, Vec<String>> = HashMap::new();
     for game_mod in mod_list {
-        if let Some(path) = game_mod.path {
-            for entry in WalkDir::new(&path)
-                .into_iter()
-                .filter_map(|e| e.map_err(|err| log::warn!("Skipping entry: {err}")).ok())
-            {
-                if !entry.file_type().is_file() {
+        let Some(declared_path) = game_mod.path else {
+            continue;
+        };
+        // Descriptor paths are untrusted Workshop content; only walk them when
+        // they resolve inside a known mod directory.
+        let Some(path) = roots.checked_path(&declared_path) else {
+            continue;
+        };
+        for entry in WalkDir::new(&path)
+            .into_iter()
+            .filter_map(|e| e.map_err(|err| log::warn!("Skipping entry: {err}")).ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if let Ok(relative) = entry.path().strip_prefix(&path) {
+                if relative == Path::new("descriptor.mod") {
                     continue;
                 }
-                if let Ok(relative) = entry.path().strip_prefix(&path) {
-                    if relative == Path::new("descriptor.mod") {
-                        continue;
-                    }
-                    let mod_name = game_mod.name.clone().unwrap_or_else(|| path.clone());
-                    file_map
-                        .entry(relative.to_path_buf())
-                        .or_default()
-                        .push(mod_name);
-                }
+                let mod_name = game_mod
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| declared_path.clone());
+                file_map
+                    .entry(relative.to_path_buf())
+                    .or_default()
+                    .push(mod_name);
             }
         }
     }
@@ -43,8 +71,8 @@ fn scan_mods(mod_list: Vec<ModDescriptor>) -> HashMap<PathBuf, Vec<String>> {
     file_map
 }
 
-pub fn conflict_detection(mods: Vec<ModDescriptor>) -> Vec<ModConflict> {
-    let file_map = scan_mods(mods);
+pub fn conflict_detection(mods: Vec<ModDescriptor>, roots: &ModRoots) -> Vec<ModConflict> {
+    let file_map = scan_mods(mods, roots);
     let mut list_of_conflicts: Vec<ModConflict> = Vec::new();
     for (file_path, mod_list) in file_map {
         if mod_list.len() > 1 {
@@ -73,6 +101,12 @@ mod tests {
         path.to_string_lossy().into_owned()
     }
 
+    fn fixture_roots() -> ModRoots {
+        ModRoots::from_roots([
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/conflict")
+        ])
+    }
+
     fn make_mod(name: &str) -> ModDescriptor {
         ModDescriptor {
             name: Some(name.to_string()),
@@ -89,7 +123,7 @@ mod tests {
     #[test]
     fn test_conflict_detected() {
         let mods = vec![make_mod("mod_a"), make_mod("mod_b")];
-        let file_map = scan_mods(mods);
+        let file_map = scan_mods(mods, &fixture_roots());
 
         let conflict_path = PathBuf::from("common/traits/foo.txt");
         let conflicting_mods = file_map.get(&conflict_path).expect("file should be in map");
@@ -101,7 +135,7 @@ mod tests {
     #[test]
     fn test_no_conflict_for_unique_files() {
         let mods = vec![make_mod("mod_a"), make_mod("mod_b")];
-        let file_map = scan_mods(mods);
+        let file_map = scan_mods(mods, &fixture_roots());
 
         let unique_path = PathBuf::from("events/my_event.txt");
         let mods_with_file = file_map.get(&unique_path).expect("file should be in map");
@@ -115,7 +149,7 @@ mod tests {
     #[test]
     fn test_conflict_detection_finds_conflicts() {
         let mods = vec![make_mod("mod_a"), make_mod("mod_b")];
-        let conflicts = conflict_detection(mods);
+        let conflicts = conflict_detection(mods, &fixture_roots());
 
         let conflict = conflicts
             .iter()
@@ -129,9 +163,29 @@ mod tests {
     #[test]
     fn test_conflict_detection_no_conflicts() {
         let mods = vec![make_mod("mod_a")];
-        let conflicts = conflict_detection(mods);
+        let conflicts = conflict_detection(mods, &fixture_roots());
 
         assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_paths_outside_mod_roots_are_not_walked() {
+        // A malicious descriptor pointing at the filesystem root (or anywhere
+        // outside the allowed mod dirs) must be skipped entirely.
+        let mut evil = make_mod("evil");
+        evil.path = Some("/".to_string());
+        let file_map = scan_mods(vec![evil], &fixture_roots());
+        assert!(file_map.is_empty());
+    }
+
+    #[test]
+    fn test_mod_sizes_reports_zero_for_disallowed_paths() {
+        let mut evil = make_mod("evil");
+        evil.path = Some("/etc".to_string());
+        let good = make_mod("mod_a");
+        let sizes = mod_sizes(&[evil.clone(), good.clone()], &fixture_roots());
+        assert_eq!(sizes[evil.mod_id()], 0);
+        assert!(sizes[good.mod_id()] > 0);
     }
 
     #[test]

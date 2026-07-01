@@ -27,6 +27,21 @@ export interface ModCollection {
   mods: ModEntry[];
 }
 
+export interface MissingDependency {
+  name: string;
+  required_by: string;
+}
+
+export interface DependencyReport {
+  activated_dependencies: string[];
+  missing: MissingDependency[];
+}
+
+export interface EnableModOutcome {
+  collection: ModCollection;
+  report: DependencyReport;
+}
+
 export type ConflictCategory =
   | 'Defines'
   | 'GameData'

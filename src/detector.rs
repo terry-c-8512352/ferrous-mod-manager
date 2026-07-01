@@ -60,7 +60,7 @@ fn detect_games_from_home(home: &Path) -> Result<Vec<DetectedGame>, DetectionErr
                 .expect("at least one candidate")
         });
 
-    let content = fs::read_to_string(&vdf_path)?;
+    let content = crate::fsutil::read_to_string_limited(&vdf_path, crate::fsutil::MAX_READ_BYTES)?;
     let libraries = vdf::parse_vdf_file(&content)?;
 
     let mut detected = Vec::new();
@@ -105,7 +105,9 @@ pub fn discover_mods(game: &DetectedGame) -> Vec<ModDescriptor> {
         .filter_map(|entry| {
             let path = entry.ok()?.path();
             if path.extension()? == "mod" {
-                let content = fs::read_to_string(&path).ok()?;
+                let content =
+                    crate::fsutil::read_to_string_limited(&path, crate::fsutil::MAX_READ_BYTES)
+                        .ok()?;
                 mod_descriptor::parse_mod_file(&content).ok()
             } else {
                 None
