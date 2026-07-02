@@ -17,7 +17,7 @@ jobs:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Tauri v2 needs the WebKitGTK/GLib stack at build time. libwebkit2gtk-4.1-dev
       # pulls in gtk3, glib-2.0, gobject-2.0 and soup3.
