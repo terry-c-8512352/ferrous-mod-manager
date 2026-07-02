@@ -38,9 +38,15 @@ pub fn run() {
             detect_achievement_compatibility,
             apply_mod_collection,
             enable_mod_with_dependencies,
+            disable_mod_with_dependents,
             launch
         ])
         .setup(|app| {
+            // Save window size/position on close and restore it on launch,
+            // instead of resetting to the dimensions in tauri.conf.json.
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_window_state::Builder::default().build())?;
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             std::fs::create_dir_all(&data_dir.join("mod-collections"))?;
@@ -144,6 +150,34 @@ fn enable_mod_with_dependencies(
     Ok(EnableModOutcome {
         collection: mod_collection,
         report,
+    })
+}
+
+#[derive(serde::Serialize)]
+struct DisableModOutcome {
+    collection: ModCollection,
+    disabled_dependents: Vec<String>,
+}
+
+/// Disable a mod in a collection together with every enabled mod that
+/// transitively depends on it (resolved by name against the installed mods),
+/// persist the updated collection, and report what was switched off with it.
+#[tauri::command]
+fn disable_mod_with_dependents(
+    game: DetectedGame,
+    mut mod_collection: ModCollection,
+    mod_id: String,
+    mods: Vec<ModDescriptor>,
+) -> Result<DisableModOutcome, String> {
+    let disabled = ferrous_mod_manager::dependency::disable_with_dependents(
+        &mut mod_collection,
+        &mod_id,
+        &mods,
+    );
+    save_collection_for_game(game.app_id, &mod_collection).map_err(|e| e.to_string())?;
+    Ok(DisableModOutcome {
+        collection: mod_collection,
+        disabled_dependents: disabled,
     })
 }
 

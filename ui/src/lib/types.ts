@@ -42,6 +42,11 @@ export interface EnableModOutcome {
   report: DependencyReport;
 }
 
+export interface DisableModOutcome {
+  collection: ModCollection;
+  disabled_dependents: string[];
+}
+
 export type ConflictCategory =
   | 'Defines'
   | 'GameData'

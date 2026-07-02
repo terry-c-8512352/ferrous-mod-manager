@@ -9,9 +9,11 @@
     import Footer from "./lib/Footer.svelte";
     import Toast from "./lib/Toast.svelte";
     import type {
+        AchievementStatus,
         DetectedGame,
         ModCollection,
         EnableModOutcome,
+        DisableModOutcome,
         ModConflict,
         ModDescriptor,
         ResolvedMod,
@@ -79,6 +81,23 @@
         invoke<Record<string, number>>("mod_sizes", { mods: installedMods })
             .then((r) => (modSizes = new Map(Object.entries(r))))
             .catch((err) => console.error(`Unable to load sizes: ${err}`));
+    });
+
+    // Per-mod achievement/ironman compatibility, keyed by mod_id. Recomputed
+    // when the game's installed set changes.
+    let achievements = $state<Map<string, AchievementStatus>>(new Map());
+    $effect(() => {
+        if (installedMods.length === 0) {
+            achievements = new Map();
+            return;
+        }
+        invoke<AchievementStatus[]>("detect_achievement_compatibility", {
+            mods: installedMods,
+        })
+            .then((r) => (achievements = new Map(r.map((s) => [s.mod_id, s]))))
+            .catch((err) =>
+                console.error(`Unable to detect achievement status: ${err}`),
+            );
     });
 
     let selectedCollectionName = $state("");
@@ -206,6 +225,7 @@
         installedByName,
         enabledNames,
         conflictsByName,
+        achievements,
     }));
 
     const decoratedInstalled = $derived(
@@ -370,13 +390,38 @@
         }
     }
 
+    // Disable a mod plus every enabled mod that transitively depends on it.
+    // The backend cascades by dependency name, persists the collection, and
+    // reports which dependents it switched off alongside the target.
+    function disableModWithDependents(modId: string) {
+        const game = games.find((g) => g.app_id === selectedGameId);
+        const col = activeCollection;
+        if (!game || !col) return;
+        const modName = resolvedModMap.get(modId)?.name ?? modId;
+        invoke<DisableModOutcome>("disable_mod_with_dependents", {
+            game,
+            modCollection: col,
+            modId,
+            mods: installedMods,
+        })
+            .then(({ collection, disabled_dependents }) => {
+                col.mods = collection.mods;
+                if (disabled_dependents.length > 0) {
+                    successMessage = `Disabled "${modName}" and ${disabled_dependents.length === 1 ? "the mod that depends on it" : `${disabled_dependents.length} mods that depend on it`}: ${disabled_dependents.join(", ")}`;
+                }
+            })
+            .catch((err) => {
+                console.error(`Failed to disable mod: ${err}`);
+                errorMessage = `Failed to disable "${modName}": ${err}`;
+            });
+    }
+
     function toggleModEnabled(modId: string) {
         if (!activeCollection) return;
         const entry = activeCollection.mods.find((m) => m.mod_id === modId);
         if (!entry) return;
         if (entry.enabled) {
-            entry.enabled = false;
-            saveCollection(activeCollection);
+            disableModWithDependents(modId);
         } else {
             enableModWithDependencies(modId);
         }
