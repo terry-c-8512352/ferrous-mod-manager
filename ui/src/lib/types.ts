@@ -65,24 +65,24 @@ export type ConflictCategory =
   | 'Sound'
   | 'Other';
 
-export interface ModConflict {
+// What a file overlap between enabled mods actually means. Mirrors
+// `ConflictVerdict`/`AssessedConflict` in src/conflict_assessment.rs: only
+// OrderingProblem and Genuine are real issues; the rest are informational.
+export type ConflictVerdict =
+  | 'OrderingProblem'
+  | 'IntendedOverride'
+  | 'Cosmetic'
+  | 'Widespread'
+  | 'Genuine';
+
+export interface AssessedConflict {
   file_path: string;
-  mod_list: string[];
+  mod_list: string[]; // in load order
   category: ConflictCategory;
-}
-
-export type ConflictSeverity = 'none' | 'low' | 'medium' | 'high';
-
-const HIGH_CATEGORIES: Set<ConflictCategory> = new Set(['GameData', 'Events', 'Map']);
-const MEDIUM_CATEGORIES: Set<ConflictCategory> = new Set(['Defines', 'Other']);
-const HOTNESS_THRESHOLD = 5;
-
-export function conflictSeverityForFile(conflict: ModConflict): ConflictSeverity {
-  const isHot = conflict.mod_list.length >= HOTNESS_THRESHOLD;
-  if (isHot) return 'low';
-  if (HIGH_CATEGORIES.has(conflict.category)) return 'high';
-  if (MEDIUM_CATEGORIES.has(conflict.category)) return 'medium';
-  return 'low';
+  verdict: ConflictVerdict;
+  winner: string; // the mod whose copy of the file the game uses
+  culprit: string | null; // OrderingProblem: the mod that must move later
+  reason: string;
 }
 
 export interface AchievementStatus {

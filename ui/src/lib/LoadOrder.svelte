@@ -202,6 +202,7 @@
           </div>
           <div class="info-line">
             {#if mod.version}<span class="mono">{mod.version}</span>{/if}
+            {#if mod.overrideNote}<span class="override-note">{mod.overrideNote}</span>{/if}
           </div>
           {#if mod.hasIssue}
             <div class="issue" style="color:{mod.statusColor}">⚠ {mod.issueText}</div>
@@ -415,6 +416,13 @@
 
   .mono {
     font-family: var(--mono);
+  }
+
+  .override-note {
+    color: var(--faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .issue {

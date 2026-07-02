@@ -15,7 +15,7 @@
         ModCollection,
         EnableModOutcome,
         DisableModOutcome,
-        ModConflict,
+        AssessedConflict,
         ModDescriptor,
         ResolvedMod,
         UserSettings,
@@ -166,21 +166,21 @@
         new Map(installedMods.map((m) => [m.mod_id, m])),
     );
 
-    let conflicts = $state<ModConflict[]>([]);
+    let conflicts = $state<AssessedConflict[]>([]);
     $effect(() => {
-        const enabledModIds = new Set(
-            (activeCollection?.mods ?? [])
-                .filter((m) => m.enabled)
-                .map((m) => m.mod_id),
-        );
-        const activeMods = installedMods.filter((m) =>
-            enabledModIds.has(m.mod_id),
-        );
+        // The backend derives verdicts and the winning mod from position, so
+        // the enabled set must be passed in collection load order.
+        const activeMods: ResolvedMod[] = [];
+        for (const e of activeCollection?.mods ?? []) {
+            if (!e.enabled) continue;
+            const m = resolvedModMap.get(e.mod_id);
+            if (m) activeMods.push(m);
+        }
         if (activeMods.length === 0) {
             conflicts = [];
             return;
         }
-        invoke<ModConflict[]>("detect_mod_conflict", { mods: activeMods })
+        invoke<AssessedConflict[]>("detect_mod_conflict", { mods: activeMods })
             .then((result) => (conflicts = result))
             .catch((err) =>
                 console.error(`Unable to detect conflicts: ${err}`),
@@ -205,7 +205,7 @@
     });
 
     const conflictsByName = $derived.by(() => {
-        const m = new Map<string, ModConflict[]>();
+        const m = new Map<string, AssessedConflict[]>();
         for (const c of conflicts) {
             for (const name of c.mod_list) {
                 let arr = m.get(name);
@@ -300,10 +300,13 @@
             .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
     });
 
-    // Unique unordered pairs of enabled mods that collide on at least one file.
+    // Unique unordered pairs of enabled mods with a *problematic* overlap.
+    // Intended overrides, cosmetic files, and widely-shared files don't count.
     const conflictPairCount = $derived.by(() => {
         const set = new Set<string>();
         for (const c of conflicts) {
+            if (c.verdict !== "Genuine" && c.verdict !== "OrderingProblem")
+                continue;
             const ns = c.mod_list;
             for (let i = 0; i < ns.length; i++)
                 for (let j = i + 1; j < ns.length; j++)

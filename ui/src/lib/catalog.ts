@@ -3,7 +3,7 @@
 // (`app-ui/src/main.rs` `category_of`/`cat_meta`/status classification), adapted
 // to the data the Tauri backend actually exposes.
 
-import type { AchievementStatus, ModConflict, ResolvedMod } from './types';
+import type { AchievementStatus, AssessedConflict, ResolvedMod } from './types';
 import { achievementSummary } from './types';
 
 // ---------------------------------------------------------------------------
@@ -153,6 +153,7 @@ export interface DecoratedMod {
   statusBg: string;
   hasIssue: boolean; // conflict or dependency problem
   issueText: string;
+  overrideNote: string; // "Overrides X (by design)" — informational, not an issue
   achievementSafe: boolean; // keeps achievements & ironman enabled
   achievementText: string; // tooltip explaining the achievement status
 }
@@ -170,8 +171,8 @@ export interface DecorateContext {
   installedByName: Map<string, ResolvedMod>;
   /** names of mods that are enabled in the active collection. */
   enabledNames: Set<string>;
-  /** mod name -> conflicts it participates in (already filtered to enabled mods). */
-  conflictsByName: Map<string, ModConflict[]>;
+  /** mod name -> assessed conflicts it participates in (enabled mods only). */
+  conflictsByName: Map<string, AssessedConflict[]>;
   /** mod_id -> achievement/ironman compatibility (absent while still loading). */
   achievements: Map<string, AchievementStatus>;
 }
@@ -187,17 +188,27 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
   };
   const enabled = cState.enabled;
 
-  // Conflicts: only meaningful for enabled mods (backend conflict detection is
-  // run against the enabled set, so any hit here is a live collision).
+  // Conflicts: only meaningful for enabled mods (backend assessment runs
+  // against the enabled set in load order). Genuine overlaps are red issues;
+  // an ordering problem flags only the mod that must move; intended overrides
+  // become an informational note on the winning mod.
   let conflictActive = false;
+  let orderingIssue = false;
+  let overrideNote = '';
   let issueText = '';
   if (enabled) {
-    const cs = ctx.conflictsByName.get(name);
-    if (cs && cs.length > 0) {
-      conflictActive = true;
-      const c = cs[0];
-      const other = c.mod_list.find((n) => n !== name) ?? '(unknown)';
-      issueText = `Conflicts with ${other} — ${c.file_path}`;
+    for (const c of ctx.conflictsByName.get(name) ?? []) {
+      if (c.verdict === 'Genuine' && !conflictActive) {
+        conflictActive = true;
+        const other = c.mod_list.find((n) => n !== name) ?? '(unknown)';
+        issueText = `Conflicts with ${other} (${c.winner} wins) — ${c.file_path}`;
+      } else if (c.verdict === 'OrderingProblem' && c.culprit === name && !orderingIssue) {
+        orderingIssue = true;
+        if (!conflictActive) issueText = c.reason;
+      } else if (c.verdict === 'IntendedOverride' && c.winner === name && !overrideNote) {
+        const overridden = c.mod_list.filter((n) => n !== name);
+        overrideNote = `Overrides ${overridden.join(', ')} (by design)`;
+      }
     }
   }
 
@@ -208,10 +219,10 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
     const o = ctx.installedByName.get(dep);
     if (!o) {
       depKind = 'missing';
-      if (!conflictActive) issueText = `Requires ${dep} — not installed`;
+      if (!conflictActive && !orderingIssue) issueText = `Requires ${dep} — not installed`;
     } else if (!ctx.enabledNames.has(dep)) {
       if (!depKind) depKind = 'disabled';
-      if (!conflictActive) issueText = `Requires ${dep} — currently disabled`;
+      if (!conflictActive && !orderingIssue) issueText = `Requires ${dep} — currently disabled`;
     }
   }
 
@@ -220,6 +231,9 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
   if (conflictActive) {
     status = 'conflict';
     statusText = 'Conflict';
+  } else if (orderingIssue) {
+    status = 'dep';
+    statusText = 'Bad order';
   } else if (depKind === 'missing') {
     status = 'dep';
     statusText = 'Missing dep';
@@ -251,6 +265,7 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
     statusBg: sMeta.bg,
     hasIssue: status === 'conflict' || status === 'dep',
     issueText,
+    overrideNote,
     // Absent status (still loading) shows no trophy rather than a wrong one.
     achievementSafe: aStatus?.compatible ?? false,
     achievementText: achievementSummary(aStatus),

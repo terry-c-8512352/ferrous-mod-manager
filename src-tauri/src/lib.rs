@@ -7,11 +7,12 @@ use ferrous_mod_manager::{
         load_or_create_collections_for_game, save_collection_for_game,
     },
     conflict,
+    conflict_assessment::{self, AssessedConflict},
     dependency::{self, DependencyReport},
     detector,
     launch::launch_game,
     locations::ModRoots,
-    models::{AchievementStatus, DetectedGame, ModCollection, ModConflict, ModDescriptor},
+    models::{AchievementStatus, DetectedGame, ModCollection, ModDescriptor},
     settings::{self, UserSettings},
 };
 use tauri::Manager;
@@ -107,9 +108,14 @@ fn delete_collection(game: DetectedGame, mod_collection: ModCollection) -> Resul
     delete_collection_for_game(game.app_id, mod_collection.id).map_err(|e| e.to_string())
 }
 
+/// Scan the enabled mods for file overlaps and classify each one (intended
+/// override / ordering problem / cosmetic / widespread / genuine). `mods`
+/// must be the enabled set **in collection load order** — verdicts and the
+/// winning mod are derived from that order.
 #[tauri::command]
-fn detect_mod_conflict(mods: Vec<ModDescriptor>) -> Vec<ModConflict> {
-    conflict::conflict_detection(mods, &ModRoots::detect())
+fn detect_mod_conflict(mods: Vec<ModDescriptor>) -> Vec<AssessedConflict> {
+    let conflicts = conflict::conflict_detection(mods.clone(), &ModRoots::detect());
+    conflict_assessment::assess_conflicts(conflicts, &mods)
 }
 
 /// On-disk size (bytes) of each mod's file tree, keyed by `mod_id`. Mods without

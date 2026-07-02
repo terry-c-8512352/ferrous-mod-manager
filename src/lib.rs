@@ -1,6 +1,7 @@
 pub mod achievements;
 pub mod collections;
 pub mod conflict;
+pub mod conflict_assessment;
 pub mod dependency;
 pub mod detector;
 pub mod errors;

@@ -2,7 +2,7 @@
 // confirm the GUI will get sensible data.
 // Run with: HOME=<mockhome> cargo run --example mock_smoke -p ferrous-mod-manager
 use ferrous_mod_manager::locations::ModRoots;
-use ferrous_mod_manager::{achievements, conflict, detector};
+use ferrous_mod_manager::{achievements, conflict, conflict_assessment, detector};
 
 fn main() {
     let games = detector::detect_games().expect("detect_games");
@@ -32,14 +32,18 @@ fn main() {
     let blockers = statuses.iter().filter(|s| !s.compatible).count();
     println!("\nIronman/achievements this loadout: {blockers} mod(s) disable them");
 
-    let conflicts = conflict::conflict_detection(mods, &mod_roots);
-    println!("\n{} file conflict(s):", conflicts.len());
-    for c in &conflicts {
+    let conflicts = conflict::conflict_detection(mods.clone(), &mod_roots);
+    // Discovery order stands in for load order here; the GUI passes the
+    // collection order instead.
+    let assessed = conflict_assessment::assess_conflicts(conflicts, &mods);
+    println!("\n{} file overlap(s):", assessed.len());
+    for a in &assessed {
         println!(
-            "  - {} : {:?}  [{:?}]",
-            c.file_path.display(),
-            c.mod_list,
-            c.category
+            "  - [{:?}] {} : {:?}\n      {}",
+            a.verdict,
+            a.file_path.display(),
+            a.mod_list,
+            a.reason
         );
     }
 }
