@@ -2,6 +2,7 @@
     import ThemeToggle from "./lib/ThemeToggle.svelte";
     import GameSelector from "./lib/GameSelector.svelte";
     import CollectionsManager from "./lib/CollectionsManager.svelte";
+    import SettingsScreen from "./lib/SettingsScreen.svelte";
     import Toolbar from "./lib/Toolbar.svelte";
     import Sidebar from "./lib/Sidebar.svelte";
     import InstalledList from "./lib/InstalledList.svelte";
@@ -17,8 +18,9 @@
         ModConflict,
         ModDescriptor,
         ResolvedMod,
+        UserSettings,
     } from "./lib/types";
-    import { resolveModId } from "./lib/types";
+    import { resolveModId, defaultSettings } from "./lib/types";
     import {
         decorateMod,
         categoryOf,
@@ -100,8 +102,23 @@
             );
     });
 
+    // User settings, loaded once at startup; every change is persisted
+    // immediately. A failed load keeps the defaults.
+    let settings = $state<UserSettings>(defaultSettings());
+    invoke<UserSettings>("load_settings")
+        .then((s) => (settings = s))
+        .catch((err) => console.error(`Unable to load settings: ${err}`));
+
+    function updateSettings(next: UserSettings) {
+        settings = next;
+        invoke("save_settings", { settings: next }).catch((err) => {
+            console.error(`Failed to save settings: ${err}`);
+            errorMessage = `Failed to save settings: ${err}`;
+        });
+    }
+
     let selectedCollectionName = $state("");
-    let view = $state<"main" | "collections">("main");
+    let view = $state<"main" | "collections" | "settings">("main");
 
     // Width (px) of the Installed column. The Load Order column is flex:1, so
     // dragging the divider between them resizes both. Persisted across sessions.
@@ -382,10 +399,13 @@
     function toggleModInCollection(modId: string) {
         if (!activeCollection) return;
         const idx = activeCollection.mods.findIndex((m) => m.mod_id === modId);
-        if (idx === -1) {
+        if (idx !== -1) {
+            activeCollection.mods.splice(idx, 1);
+            saveCollection(activeCollection);
+        } else if (settings.auto_dependencies) {
             enableModWithDependencies(modId);
         } else {
-            activeCollection.mods.splice(idx, 1);
+            activeCollection.mods.push({ mod_id: modId, enabled: true });
             saveCollection(activeCollection);
         }
     }
@@ -420,10 +440,15 @@
         if (!activeCollection) return;
         const entry = activeCollection.mods.find((m) => m.mod_id === modId);
         if (!entry) return;
-        if (entry.enabled) {
-            disableModWithDependents(modId);
+        if (settings.auto_dependencies) {
+            if (entry.enabled) {
+                disableModWithDependents(modId);
+            } else {
+                enableModWithDependencies(modId);
+            }
         } else {
-            enableModWithDependencies(modId);
+            entry.enabled = !entry.enabled;
+            saveCollection(activeCollection);
         }
     }
 
@@ -581,9 +606,23 @@
         <GameSelector {games} {selectedGameId} onselect={switchGame} />
         <span class="title-spacer"></span>
         <ThemeToggle />
+        <button
+            class="settings-btn"
+            onclick={() => (view = view === "settings" ? "main" : "settings")}
+            title="Settings"
+            aria-label="Settings"
+        >
+            ⚙
+        </button>
     </div>
 
-    {#if view === "collections"}
+    {#if view === "settings"}
+        <SettingsScreen
+            {settings}
+            onback={() => (view = "main")}
+            onchange={updateSettings}
+        />
+    {:else if view === "collections"}
         <CollectionsManager
             {collections}
             onback={() => (view = "main")}
@@ -631,6 +670,7 @@
             <LoadOrder
                 mods={decoratedCollection}
                 {enabledCount}
+                autoDependencies={settings.auto_dependencies}
                 ontoggle={toggleModEnabled}
                 onmove={moveMod}
                 onremove={removeMod}
@@ -678,6 +718,23 @@
 
     .title-spacer {
         flex: 1;
+    }
+
+    .settings-btn {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        color: var(--text-h);
+        cursor: pointer;
+        font-size: 13px;
+        line-height: 1;
+        padding: 4px 8px;
+    }
+
+    .settings-btn:hover {
+        background: var(--accent-bg);
+        border-color: var(--accent-border);
+        color: var(--accent);
     }
 
     .body {

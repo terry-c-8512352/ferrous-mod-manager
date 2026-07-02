@@ -1,16 +1,18 @@
 use uuid::Uuid;
 
+use crate::detector;
 use crate::errors::FileOperationError;
+use crate::fsutil::{MAX_READ_BYTES, read_to_string_limited, write_atomic};
 use crate::locations::game_data_dir;
 use crate::models::{DetectedGame, DlcLoad, ModCollection};
 use std::fs::{create_dir_all, read_dir};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn create_collection_for_game(
     app_id: u32,
-    name: String,
+    name: &str,
 ) -> Result<ModCollection, FileOperationError> {
-    let mc = ModCollection::new(&name);
+    let mc = ModCollection::new(name);
     save_collection_for_game(app_id, &mc)?;
     Ok(mc)
 }
@@ -25,32 +27,27 @@ pub const DEFAULT_COLLECTION_NAME: &str = "Default";
 pub fn load_or_create_collections_for_game(
     app_id: u32,
 ) -> Result<Vec<ModCollection>, FileOperationError> {
-    let mut collections = load_collection_for_game(game_data_dir(app_id));
+    let mut collections = load_collection_for_game(&game_data_dir(app_id));
     if collections.is_empty() {
-        let default = create_collection_for_game(app_id, DEFAULT_COLLECTION_NAME.to_string())?;
+        let default = create_collection_for_game(app_id, DEFAULT_COLLECTION_NAME)?;
         collections.push(default);
     }
     Ok(collections)
 }
 
-pub fn load_collection_for_game(path: PathBuf) -> Vec<ModCollection> {
+/// Load every collection JSON in `path`. Unreadable directories yield an empty
+/// list (a game with no collections yet); individually corrupt files are
+/// skipped with a warning rather than failing the rest.
+pub fn load_collection_for_game(path: &Path) -> Vec<ModCollection> {
     let mut mod_collections: Vec<ModCollection> = vec![];
-    let Ok(read_result) = read_dir(path.as_path()) else {
+    let Ok(read_result) = read_dir(path) else {
         log::warn!("No mod collections found in : {}", path.display());
         return mod_collections;
     };
-    for file in read_result {
-        if let Ok(entry) = file {
-            let load_attempt = ModCollection::load(&entry.path());
-
-            match load_attempt {
-                Ok(mc) => {
-                    mod_collections.push(mc);
-                }
-                Err(e) => {
-                    log::warn!("Unable to load mod collection: {}", e)
-                }
-            }
+    for entry in read_result.flatten() {
+        match ModCollection::load(&entry.path()) {
+            Ok(mc) => mod_collections.push(mc),
+            Err(e) => log::warn!("Unable to load mod collection: {}", e),
         }
     }
 
@@ -71,22 +68,15 @@ pub fn import_collection_for_game(
     Ok(collection)
 }
 
+/// Save a collection into the game's store as `<uuid>.json`, creating the
+/// directory on first save.
 pub fn save_collection_for_game(
     app_id: u32,
     mod_collection: &ModCollection,
 ) -> Result<(), FileOperationError> {
-    let path = PathBuf::from(game_data_dir(app_id));
-    if path.exists() {
-        format_save(&mod_collection, &path)?;
-    } else {
-        create_dir_all(game_data_dir(app_id))?;
-        format_save(&mod_collection, &path)?;
-    }
-    Ok(())
-}
-
-fn format_save(mod_collection: &ModCollection, path: &PathBuf) -> Result<(), FileOperationError> {
-    mod_collection.save(&path.join(format!("{}.json", mod_collection.id.to_string())))?;
+    let dir = game_data_dir(app_id);
+    create_dir_all(&dir)?;
+    mod_collection.save(&dir.join(format!("{}.json", mod_collection.id)))?;
     Ok(())
 }
 
@@ -94,7 +84,7 @@ pub fn delete_collection_for_game(
     app_id: u32,
     mod_collection_id: Uuid,
 ) -> Result<(), FileOperationError> {
-    let path = game_data_dir(app_id).join(format!("{}.json", mod_collection_id.to_string()));
+    let path = game_data_dir(app_id).join(format!("{}.json", mod_collection_id));
     std::fs::remove_file(path)?;
     Ok(())
 }
@@ -108,7 +98,7 @@ pub fn apply_mod_collection_by_app_id(
     app_id: u32,
     mod_collection: &ModCollection,
 ) -> Result<(), FileOperationError> {
-    let games = crate::detector::detect_games()?;
+    let games = detector::detect_games()?;
     let game = games
         .iter()
         .find(|g| g.app_id == app_id)
@@ -121,8 +111,7 @@ pub fn apply_mod_collection_for_game(
     mod_collection: &ModCollection,
 ) -> Result<(), FileOperationError> {
     let data_path = Path::new(&game.paradox_data_path).join("dlc_load.json");
-    let dlc_load_contents =
-        crate::fsutil::read_to_string_limited(&data_path, crate::fsutil::MAX_READ_BYTES)?;
+    let dlc_load_contents = read_to_string_limited(&data_path, MAX_READ_BYTES)?;
     let mut dlc_load: DlcLoad = serde_json::from_str(dlc_load_contents.as_str())?;
     dlc_load.enabled_mods = Vec::new();
     for md in &mod_collection.mods {
@@ -136,18 +125,17 @@ pub fn apply_mod_collection_for_game(
     let dlc_load_contents = serde_json::to_string_pretty(&dlc_load)?;
     // Atomic replace: a crash mid-write must not leave the game with a
     // truncated dlc_load.json.
-    crate::fsutil::write_atomic(&data_path, &dlc_load_contents)?;
+    write_atomic(&data_path, &dlc_load_contents)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::detector;
 
     #[test]
     fn test_load_correct_collection_for_game() {
-        let path = PathBuf::new().join("tests/fixtures/mod_collections/123456");
+        let path = Path::new("tests/fixtures/mod_collections/123456");
         let mod_collection = load_collection_for_game(path);
         assert_eq!(mod_collection.len(), 1);
         assert_eq!(mod_collection[0].name, "test-collection");

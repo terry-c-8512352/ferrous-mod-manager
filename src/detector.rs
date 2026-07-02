@@ -1,10 +1,42 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use crate::errors::DetectionError;
+use crate::fsutil::{MAX_READ_BYTES, read_to_string_limited};
+use crate::locations::{paradox_data_root, steam_library_vdf_candidates};
 use crate::models::{DetectedGame, ModDescriptor};
 use crate::parser::{mod_descriptor, vdf};
+
+/// Supported Paradox games: Steam app id, display name, Steam install folder,
+/// and Paradox data folder (the latter two differ for some titles).
+const KNOWN_GAMES: &[(u32, &str, &str, &str)] = &[
+    (281990, "Stellaris", "Stellaris", "Stellaris"),
+    (
+        236850,
+        "Europa Universalis IV",
+        "Europa Universalis IV",
+        "Europa Universalis IV",
+    ),
+    (
+        394360,
+        "Hearts of Iron IV",
+        "Hearts of Iron IV",
+        "Hearts of Iron IV",
+    ),
+    (
+        1158310,
+        "Crusader Kings III",
+        "Crusader Kings III",
+        "Crusader Kings III",
+    ),
+    (529340, "Victoria 3", "Victoria 3", "Victoria 3"),
+    (
+        859580,
+        "Imperator: Rome",
+        "Imperator Rome",
+        "Imperator Rome",
+    ),
+];
 
 pub fn detect_games() -> Result<Vec<DetectedGame>, DetectionError> {
     let home = dirs::home_dir().ok_or(DetectionError::NoHomeDir)?;
@@ -12,41 +44,7 @@ pub fn detect_games() -> Result<Vec<DetectedGame>, DetectionError> {
 }
 
 fn detect_games_from_home(home: &Path) -> Result<Vec<DetectedGame>, DetectionError> {
-    // (game_name, steam_folder, paradox_folder)
-    let game_info: HashMap<u32, (&str, &str, &str)> = HashMap::from([
-        (281990, ("Stellaris", "Stellaris", "Stellaris")),
-        (
-            236850,
-            (
-                "Europa Universalis IV",
-                "Europa Universalis IV",
-                "Europa Universalis IV",
-            ),
-        ),
-        (
-            394360,
-            (
-                "Hearts of Iron IV",
-                "Hearts of Iron IV",
-                "Hearts of Iron IV",
-            ),
-        ),
-        (
-            1158310,
-            (
-                "Crusader Kings III",
-                "Crusader Kings III",
-                "Crusader Kings III",
-            ),
-        ),
-        (529340, ("Victoria 3", "Victoria 3", "Victoria 3")),
-        (
-            859580,
-            ("Imperator: Rome", "Imperator Rome", "Imperator Rome"),
-        ),
-    ]);
-
-    let candidates = crate::locations::steam_library_vdf_candidates(home);
+    let candidates = steam_library_vdf_candidates(home);
     // Use the first candidate that exists; otherwise fall back to the first so
     // the missing-file case still surfaces as a descriptive IO error.
     let vdf_path = candidates
@@ -60,33 +58,36 @@ fn detect_games_from_home(home: &Path) -> Result<Vec<DetectedGame>, DetectionErr
                 .expect("at least one candidate")
         });
 
-    let content = crate::fsutil::read_to_string_limited(&vdf_path, crate::fsutil::MAX_READ_BYTES)?;
+    let content = read_to_string_limited(&vdf_path, MAX_READ_BYTES)?;
     let libraries = vdf::parse_vdf_file(&content)?;
 
     let mut detected = Vec::new();
 
     for library in libraries {
         for app_id in &library.apps {
-            if let Some(&(game_name, folder_name, paradox_folder)) = game_info.get(app_id) {
-                let install_path = Path::new(&library.path)
-                    .join("steamapps")
-                    .join("common")
-                    .join(folder_name)
-                    .to_string_lossy()
-                    .into_owned();
+            let Some(&(_, game_name, folder_name, paradox_folder)) =
+                KNOWN_GAMES.iter().find(|(id, ..)| id == app_id)
+            else {
+                continue;
+            };
+            let install_path = Path::new(&library.path)
+                .join("steamapps")
+                .join("common")
+                .join(folder_name)
+                .to_string_lossy()
+                .into_owned();
 
-                let paradox_data_path = crate::locations::paradox_data_root(home)
-                    .join(paradox_folder)
-                    .to_string_lossy()
-                    .into_owned();
+            let paradox_data_path = paradox_data_root(home)
+                .join(paradox_folder)
+                .to_string_lossy()
+                .into_owned();
 
-                detected.push(DetectedGame {
-                    app_id: *app_id,
-                    install_path,
-                    game_name: game_name.to_string(),
-                    paradox_data_path,
-                });
-            }
+            detected.push(DetectedGame {
+                app_id: *app_id,
+                install_path,
+                game_name: game_name.to_string(),
+                paradox_data_path,
+            });
         }
     }
 
@@ -94,24 +95,20 @@ fn detect_games_from_home(home: &Path) -> Result<Vec<DetectedGame>, DetectionErr
 }
 
 pub fn discover_mods(game: &DetectedGame) -> Vec<ModDescriptor> {
-    let mod_dir = std::path::Path::new(&game.paradox_data_path).join("mod");
+    let mod_dir = Path::new(&game.paradox_data_path).join("mod");
 
-    let entries = match fs::read_dir(&mod_dir) {
-        Ok(e) => e,
-        Err(_) => return vec![],
+    let Ok(entries) = fs::read_dir(&mod_dir) else {
+        return vec![];
     };
 
     entries
         .filter_map(|entry| {
             let path = entry.ok()?.path();
-            if path.extension()? == "mod" {
-                let content =
-                    crate::fsutil::read_to_string_limited(&path, crate::fsutil::MAX_READ_BYTES)
-                        .ok()?;
-                mod_descriptor::parse_mod_file(&content).ok()
-            } else {
-                None
+            if path.extension()? != "mod" {
+                return None;
             }
+            let content = read_to_string_limited(&path, MAX_READ_BYTES).ok()?;
+            mod_descriptor::parse_mod_file(&content).ok()
         })
         .collect()
 }

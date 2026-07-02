@@ -6,12 +6,14 @@
   interface Props {
     mods: DecoratedMod[];
     enabledCount: number;
+    /** Whether toggling a mod cascades to its dependencies/dependents (user setting). */
+    autoDependencies: boolean;
     ontoggle: (modId: string) => void;
     onmove: (from: number, to: number) => void;
     onremove: (modId: string) => void;
   }
 
-  let { mods, enabledCount, ontoggle, onmove, onremove }: Props = $props();
+  let { mods, enabledCount, autoDependencies, ontoggle, onmove, onremove }: Props = $props();
 
   let dragIndex = $state<number | null>(null);
   let overIndex = $state<number | null>(null);
@@ -176,8 +178,12 @@
           class:on={mod.enabled}
           onclick={() => ontoggle(mod.mod_id)}
           title={mod.enabled
-            ? 'Disable — also disables mods that depend on this one'
-            : 'Enable — also enables its dependencies'}
+            ? autoDependencies
+              ? 'Disable — also disables mods that depend on this one'
+              : 'Disable'
+            : autoDependencies
+              ? 'Enable — also enables its dependencies'
+              : 'Enable'}
           aria-label={mod.enabled ? 'Disable mod' : 'Enable mod'}
         >
           {#if mod.enabled}✓{/if}

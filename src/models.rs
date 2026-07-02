@@ -1,7 +1,6 @@
 use crate::errors::FileOperationError;
 use crate::fsutil::{MAX_READ_BYTES, read_to_string_limited, write_atomic};
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -142,9 +141,8 @@ impl ModCollection {
         });
     }
 
-    pub fn toggle_mod(&mut self, mod_id: String) {
-        let found_mod = self.mods.iter_mut().find(|m| m.mod_id == mod_id);
-        match found_mod {
+    pub fn toggle_mod(&mut self, mod_id: &str) {
+        match self.mods.iter_mut().find(|m| m.mod_id == mod_id) {
             None => log::warn!("toggle_mod: mod_id '{}' not found", mod_id),
             Some(entry) => entry.enabled = !entry.enabled,
         }

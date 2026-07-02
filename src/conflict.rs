@@ -45,6 +45,7 @@ fn scan_mods(mod_list: Vec<ModDescriptor>, roots: &ModRoots) -> HashMap<PathBuf,
         let Some(path) = roots.checked_path(&declared_path) else {
             continue;
         };
+        let mod_name = game_mod.name.unwrap_or(declared_path);
         for entry in WalkDir::new(&path)
             .into_iter()
             .filter_map(|e| e.map_err(|err| log::warn!("Skipping entry: {err}")).ok())
@@ -56,14 +57,10 @@ fn scan_mods(mod_list: Vec<ModDescriptor>, roots: &ModRoots) -> HashMap<PathBuf,
                 if relative == Path::new("descriptor.mod") {
                     continue;
                 }
-                let mod_name = game_mod
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| declared_path.clone());
                 file_map
                     .entry(relative.to_path_buf())
                     .or_default()
-                    .push(mod_name);
+                    .push(mod_name.clone());
             }
         }
     }
@@ -72,20 +69,15 @@ fn scan_mods(mod_list: Vec<ModDescriptor>, roots: &ModRoots) -> HashMap<PathBuf,
 }
 
 pub fn conflict_detection(mods: Vec<ModDescriptor>, roots: &ModRoots) -> Vec<ModConflict> {
-    let file_map = scan_mods(mods, roots);
-    let mut list_of_conflicts: Vec<ModConflict> = Vec::new();
-    for (file_path, mod_list) in file_map {
-        if mod_list.len() > 1 {
-            let mod_category = ConflictCategory::from_path(&file_path);
-            list_of_conflicts.push(ModConflict {
-                file_path,
-                mod_list,
-                category: mod_category,
-            });
-        }
-    }
-
-    list_of_conflicts
+    scan_mods(mods, roots)
+        .into_iter()
+        .filter(|(_, mod_list)| mod_list.len() > 1)
+        .map(|(file_path, mod_list)| ModConflict {
+            category: ConflictCategory::from_path(&file_path),
+            file_path,
+            mod_list,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -153,7 +145,7 @@ mod tests {
 
         let conflict = conflicts
             .iter()
-            .find(|c| c.file_path == PathBuf::from("common/traits/foo.txt"))
+            .find(|c| c.file_path == Path::new("common/traits/foo.txt"))
             .expect("expected a conflict on foo.txt");
 
         assert!(conflict.mod_list.contains(&"mod_a".to_string()));
