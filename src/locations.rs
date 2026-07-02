@@ -1,10 +1,22 @@
 use std::path::{Path, PathBuf};
 
-pub fn data_dir() -> PathBuf {
+use crate::fsutil::{MAX_READ_BYTES, read_to_string_limited};
+use crate::parser::vdf::parse_vdf_file;
+
+/// The application's own data directory (collections, settings).
+pub fn app_data_root() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("~/.local/share"))
         .join("ferrous-mod-manager")
-        .join("mod-collections")
+}
+
+pub fn data_dir() -> PathBuf {
+    app_data_root().join("mod-collections")
+}
+
+/// The user settings file, a sibling of the collection store.
+pub fn settings_file() -> PathBuf {
+    app_data_root().join("settings.json")
 }
 
 pub fn game_data_dir(app_id: u32) -> PathBuf {
@@ -86,9 +98,9 @@ impl ModRoots {
             .into_iter()
             .find(|p| p.exists())
         {
-            match crate::fsutil::read_to_string_limited(&vdf_path, crate::fsutil::MAX_READ_BYTES)
+            match read_to_string_limited(&vdf_path, MAX_READ_BYTES)
                 .map_err(|e| e.to_string())
-                .and_then(|c| crate::parser::vdf::parse_vdf_file(&c).map_err(|e| e.to_string()))
+                .and_then(|c| parse_vdf_file(&c).map_err(|e| e.to_string()))
             {
                 Ok(libraries) => {
                     for library in libraries {

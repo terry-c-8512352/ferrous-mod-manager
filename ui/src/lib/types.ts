@@ -47,6 +47,14 @@ export interface DisableModOutcome {
   disabled_dependents: string[];
 }
 
+export interface UserSettings {
+  auto_dependencies: boolean;
+}
+
+export function defaultSettings(): UserSettings {
+  return { auto_dependencies: true };
+}
+
 export type ConflictCategory =
   | 'Defines'
   | 'GameData'

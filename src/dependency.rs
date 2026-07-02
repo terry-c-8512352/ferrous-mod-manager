@@ -334,8 +334,8 @@ mod tests {
         col.add_mod("1".to_string());
         col.add_mod("9".to_string());
         col.add_mod("2".to_string());
-        col.toggle_mod("1".to_string()); // disable target
-        col.toggle_mod("2".to_string()); // disable dependency
+        col.toggle_mod("1"); // disable target
+        col.toggle_mod("2"); // disable dependency
         let report = enable_with_dependencies(&mut col, "1", &installed);
         // B pulled to just before A; unrelated X keeps its relative position.
         assert_eq!(ids(&col), vec!["2", "1", "9"]);
@@ -407,7 +407,7 @@ mod tests {
             descriptor("C", "3", &["B"]),
         ];
         let mut col = enabled_collection(&["1", "2", "3"]);
-        col.toggle_mod("2".to_string()); // B already off
+        col.toggle_mod("2"); // B already off
         let disabled = disable_with_dependents(&mut col, "1", &installed);
         // C still requires A via B, so it switches off; B is only reported once off.
         assert_eq!(disabled, vec!["C"]);

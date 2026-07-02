@@ -24,7 +24,11 @@ pub fn parse_tabbed_kv_pair(input: &str) -> IResult<&str, (&str, &str)> {
     separated_pair(parse_quoted_string, multispace1, parse_quoted_string).parse(input)
 }
 
-pub fn parse_apps_block(input: &str) -> IResult<&str, (&str, Vec<(&str, &str)>)> {
+/// A parsed `"name" { "key" "value" ... }` block: the block's name plus its
+/// key/value pairs.
+pub type VdfBlock<'a> = (&'a str, Vec<(&'a str, &'a str)>);
+
+pub fn parse_apps_block(input: &str) -> IResult<&str, VdfBlock<'_>> {
     separated_pair(
         parse_quoted_string,
         multispace1,
