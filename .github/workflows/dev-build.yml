@@ -7,12 +7,15 @@ name: Dev build (Linux)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build standalone binary
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       # Tauri v2 needs the WebKitGTK/GLib stack at build time on Linux.
       - name: Install Linux build dependencies
@@ -25,13 +28,17 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to a commit, so the toolchain must be given explicitly (the
+      # action can no longer infer it from an @stable ref).
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       # Frontend deps for the tauri beforeBuildCommand (`cd ../ui && npm run build`).
       - name: Install frontend dependencies
@@ -50,7 +57,7 @@ jobs:
       # Workspace target dir is at the repo root; the AppImage lands under
       # bundle/appimage/ as <productName>_<version>_amd64.AppImage.
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ferrous-mod-manager-AppImage
           path: target/release/bundle/appimage/*.AppImage
