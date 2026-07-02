@@ -27,6 +27,7 @@
   --bd2: #f2f4f7;
   --panel: #fbfcfd;
   --surface: #ffffff;
+  --trophy: #b8860b;
 
   --sans: 'Hanken Grotesk', system-ui, sans-serif;
   --heading: 'Hanken Grotesk', system-ui, sans-serif;
@@ -71,6 +72,7 @@
     --bd2: #23262d;
     --panel: #1a1c21;
     --surface: #16181c;
+    --trophy: #e3b341;
     --shadow:
       rgba(0, 0, 0, 0.45) 0 10px 15px -3px, rgba(0, 0, 0, 0.3) 0 4px 6px -2px;
   }
@@ -99,6 +101,7 @@
   --bd2: #23262d;
   --panel: #1a1c21;
   --surface: #16181c;
+  --trophy: #e3b341;
   --shadow:
     rgba(0, 0, 0, 0.45) 0 10px 15px -3px, rgba(0, 0, 0, 0.3) 0 4px 6px -2px;
   color-scheme: dark;

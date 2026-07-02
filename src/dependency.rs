@@ -168,6 +168,66 @@ pub fn enable_with_dependencies(
     }
 }
 
+/// Disable `target_id` in `collection` together with every enabled mod that
+/// transitively depends on it (matched by name, the same way descriptors
+/// declare dependencies). Returns the display names of the dependents that
+/// were switched off — the target itself excluded.
+///
+/// The cascade propagates through already-disabled dependents, so a mod whose
+/// requirement chain reaches the target still switches off even when an
+/// intermediate link was disabled beforehand.
+pub fn disable_with_dependents(
+    collection: &mut ModCollection,
+    target_id: &str,
+    installed: &[ModDescriptor],
+) -> Vec<String> {
+    if let Some(entry) = collection.mods.iter_mut().find(|e| e.mod_id == target_id) {
+        entry.enabled = false;
+    }
+
+    // Dependents reference the target by display name; an uninstalled or
+    // unnamed target can't be depended on, so there is nothing to cascade.
+    let Some(target_name) = installed
+        .iter()
+        .find(|m| m.mod_id() == target_id)
+        .and_then(|m| m.name.as_deref())
+    else {
+        return Vec::new();
+    };
+
+    // Reverse edges: dependency name -> mods that declare it.
+    let mut dependents_of: HashMap<&str, Vec<&ModDescriptor>> = HashMap::new();
+    for m in installed {
+        for dep_name in m.dependencies.iter().flatten() {
+            dependents_of.entry(dep_name.as_str()).or_default().push(m);
+        }
+    }
+
+    let mut deactivated = Vec::new();
+    let mut visited: HashSet<&str> = HashSet::from([target_name]);
+    let mut queue = vec![target_name];
+    while let Some(name) = queue.pop() {
+        for dependent in dependents_of.get(name).into_iter().flatten() {
+            let Some(dependent_name) = dependent.name.as_deref() else {
+                continue;
+            };
+            if !visited.insert(dependent_name) {
+                continue;
+            }
+            if let Some(entry) = collection
+                .mods
+                .iter_mut()
+                .find(|e| e.mod_id == dependent.mod_id() && e.enabled)
+            {
+                entry.enabled = false;
+                deactivated.push(dependent_name.to_string());
+            }
+            queue.push(dependent_name);
+        }
+    }
+    deactivated
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +363,86 @@ mod tests {
         assert!(col.mods[0].enabled);
         assert_eq!(report.missing[0].name, "Ghost Mod");
         assert_eq!(report.missing[0].required_by, "A");
+    }
+
+    /// Collection where every listed mod is added and enabled.
+    fn enabled_collection(ids: &[&str]) -> ModCollection {
+        let mut col = ModCollection::new("test");
+        for id in ids {
+            col.add_mod(id.to_string());
+        }
+        col
+    }
+
+    fn enabled_ids(collection: &ModCollection) -> Vec<&str> {
+        collection
+            .mods
+            .iter()
+            .filter(|e| e.enabled)
+            .map(|e| e.mod_id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn test_disable_cascades_to_transitive_dependents() {
+        // C depends on B depends on A; X is unrelated.
+        let installed = vec![
+            descriptor("A", "1", &[]),
+            descriptor("B", "2", &["A"]),
+            descriptor("C", "3", &["B"]),
+            descriptor("X", "9", &[]),
+        ];
+        let mut col = enabled_collection(&["1", "2", "3", "9"]);
+        let mut disabled = disable_with_dependents(&mut col, "1", &installed);
+        disabled.sort();
+        assert_eq!(disabled, vec!["B", "C"]);
+        assert_eq!(enabled_ids(&col), vec!["9"]);
+    }
+
+    #[test]
+    fn test_disable_cascades_through_already_disabled_dependent() {
+        let installed = vec![
+            descriptor("A", "1", &[]),
+            descriptor("B", "2", &["A"]),
+            descriptor("C", "3", &["B"]),
+        ];
+        let mut col = enabled_collection(&["1", "2", "3"]);
+        col.toggle_mod("2".to_string()); // B already off
+        let disabled = disable_with_dependents(&mut col, "1", &installed);
+        // C still requires A via B, so it switches off; B is only reported once off.
+        assert_eq!(disabled, vec!["C"]);
+        assert!(enabled_ids(&col).is_empty());
+    }
+
+    #[test]
+    fn test_disable_leaves_non_dependents_enabled() {
+        let installed = vec![
+            descriptor("A", "1", &[]),
+            descriptor("B", "2", &["A"]),
+            descriptor("X", "9", &[]),
+        ];
+        let mut col = enabled_collection(&["1", "2", "9"]);
+        let disabled = disable_with_dependents(&mut col, "2", &installed);
+        // Disabling the dependent must not touch the dependency or bystanders.
+        assert!(disabled.is_empty());
+        assert_eq!(enabled_ids(&col), vec!["1", "9"]);
+    }
+
+    #[test]
+    fn test_disable_cycle_terminates_and_disables_both() {
+        let installed = vec![descriptor("A", "1", &["B"]), descriptor("B", "2", &["A"])];
+        let mut col = enabled_collection(&["1", "2"]);
+        let disabled = disable_with_dependents(&mut col, "1", &installed);
+        assert_eq!(disabled, vec!["B"]);
+        assert!(enabled_ids(&col).is_empty());
+    }
+
+    #[test]
+    fn test_disable_uninstalled_target_only_disables_its_entry() {
+        let installed = vec![descriptor("A", "1", &[])];
+        let mut col = enabled_collection(&["999", "1"]);
+        let disabled = disable_with_dependents(&mut col, "999", &installed);
+        assert!(disabled.is_empty());
+        assert_eq!(enabled_ids(&col), vec!["1"]);
     }
 }

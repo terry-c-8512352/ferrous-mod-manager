@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import TrophyIcon from './TrophyIcon.svelte';
   import type { DecoratedMod } from './catalog';
 
   interface Props {
@@ -170,13 +171,28 @@
             }
           }}
         />
-        <div class="thumb" style="background:{mod.catBg};color:{mod.catColor}">{mod.initials}</div>
+        <button
+          class="check"
+          class:on={mod.enabled}
+          onclick={() => ontoggle(mod.mod_id)}
+          title={mod.enabled
+            ? 'Disable — also disables mods that depend on this one'
+            : 'Enable — also enables its dependencies'}
+          aria-label={mod.enabled ? 'Disable mod' : 'Enable mod'}
+        >
+          {#if mod.enabled}✓{/if}
+        </button>
         <div class="meta">
           <div class="name-line">
             <span class="name">{mod.name}</span>
-            <span class="cat-tag" style="color:{mod.catColor};background:{mod.catBg}">
+            <span class="cat-tag" style="color:{mod.catColor}">
               {mod.catLabel}
             </span>
+            {#if mod.achievementSafe}
+              <span class="ach" title={mod.achievementText}>
+                <TrophyIcon size={13} title={mod.achievementText} />
+              </span>
+            {/if}
           </div>
           <div class="info-line">
             {#if mod.version}<span class="mono">{mod.version}</span>{/if}
@@ -319,16 +335,28 @@
     cursor: default;
   }
 
-  .thumb {
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
+  .check {
+    position: relative;
+    width: 18px;
+    height: 18px;
+    flex: none;
+    cursor: pointer;
+    border-radius: 5px;
+    border: 1.5px solid #c4cad2;
+    background: var(--surface);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
-    font-weight: 700;
-    flex: none;
+    padding: 0;
+  }
+
+  .check.on {
+    border-color: var(--acc);
+    background: var(--acc);
   }
 
   .meta {
@@ -352,11 +380,20 @@
   }
 
   .cat-tag {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 5px;
+    line-height: 14px; /* hug the text; without this the root 145% line-height (~26px) applies */
+    padding: 0 4px;
+    border: 1px solid currentColor;
+    border-radius: 2px;
     white-space: nowrap;
+    flex: none;
+  }
+
+  .ach {
+    display: flex;
+    align-items: center;
+    color: var(--trophy);
     flex: none;
   }
 
@@ -387,9 +424,10 @@
     font-family: inherit;
     font-size: 11px;
     font-weight: 600;
-    padding: 2px 9px;
+    line-height: 14px;
+    padding: 1px 7px;
     border: none;
-    border-radius: 999px;
+    border-radius: 3px;
     white-space: nowrap;
     cursor: pointer;
     flex: none;

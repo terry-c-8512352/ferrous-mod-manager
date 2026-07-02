@@ -3,7 +3,8 @@
 // (`app-ui/src/main.rs` `category_of`/`cat_meta`/status classification), adapted
 // to the data the Tauri backend actually exposes.
 
-import type { ModConflict, ResolvedMod } from './types';
+import type { AchievementStatus, ModConflict, ResolvedMod } from './types';
+import { achievementSummary } from './types';
 
 // ---------------------------------------------------------------------------
 // Categories (bucketed from Paradox `tags`)
@@ -111,18 +112,6 @@ export function humanSize(bytes: number): string {
   return `${(bytes / (KB * KB * KB)).toFixed(1)} GB`;
 }
 
-/** 1-2 uppercase initials from a mod name for its thumbnail. */
-export function initials(name: string): string {
-  const inits = name
-    .split(/\s+/)
-    .filter((w) => /[a-z0-9]/i.test(w[0] ?? ''))
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase();
-  return inits || 'M';
-}
-
 // ---------------------------------------------------------------------------
 // Per-mod status classification
 // ---------------------------------------------------------------------------
@@ -153,8 +142,6 @@ export interface DecoratedMod {
   category: CategoryKey;
   catLabel: string;
   catColor: string;
-  catBg: string;
-  initials: string;
   sizeBytes: number;
   sizeLabel: string;
   inCollection: boolean;
@@ -166,6 +153,8 @@ export interface DecoratedMod {
   statusBg: string;
   hasIssue: boolean; // conflict or dependency problem
   issueText: string;
+  achievementSafe: boolean; // keeps achievements & ironman enabled
+  achievementText: string; // tooltip explaining the achievement status
 }
 
 /** Lookups shared across every mod in a single decoration pass. */
@@ -183,6 +172,8 @@ export interface DecorateContext {
   enabledNames: Set<string>;
   /** mod name -> conflicts it participates in (already filtered to enabled mods). */
   conflictsByName: Map<string, ModConflict[]>;
+  /** mod_id -> achievement/ironman compatibility (absent while still loading). */
+  achievements: Map<string, AchievementStatus>;
 }
 
 export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMod {
@@ -239,6 +230,7 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
 
   const sMeta = STATUS_META[status];
   const sizeBytes = ctx.sizes.get(mod.mod_id) ?? 0;
+  const aStatus = ctx.achievements.get(mod.mod_id);
 
   return {
     mod_id: mod.mod_id,
@@ -248,8 +240,6 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
     category: cat,
     catLabel: meta.label,
     catColor: meta.color,
-    catBg: meta.bg,
-    initials: initials(name),
     sizeBytes,
     sizeLabel: humanSize(sizeBytes),
     inCollection: cState.inCollection,
@@ -261,5 +251,8 @@ export function decorateMod(mod: ResolvedMod, ctx: DecorateContext): DecoratedMo
     statusBg: sMeta.bg,
     hasIssue: status === 'conflict' || status === 'dep',
     issueText,
+    // Absent status (still loading) shows no trophy rather than a wrong one.
+    achievementSafe: aStatus?.compatible ?? false,
+    achievementText: achievementSummary(aStatus),
   };
 }

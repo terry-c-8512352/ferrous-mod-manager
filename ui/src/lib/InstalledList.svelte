@@ -1,4 +1,5 @@
 <script lang="ts">
+  import TrophyIcon from './TrophyIcon.svelte';
   import type { DecoratedMod } from './catalog';
 
   interface Props {
@@ -19,11 +20,15 @@
   <div class="list">
     {#each mods as mod (mod.mod_id)}
       <div class="row">
-        <div class="thumb" style="background:{mod.catBg};color:{mod.catColor}">{mod.initials}</div>
         <div class="meta">
           <div class="name">{mod.name}</div>
           <div class="sub-line">{mod.catLabel} · <span class="mono">{mod.sizeLabel}</span></div>
         </div>
+        {#if mod.achievementSafe}
+          <span class="ach" title={mod.achievementText}>
+            <TrophyIcon size={12} title={mod.achievementText} />
+          </span>
+        {/if}
         {#if mod.hasIssue}
           <span class="issue-dot" style="background:{mod.statusColor}" title={mod.issueText}></span>
         {/if}
@@ -93,18 +98,6 @@
     background: var(--panel);
   }
 
-  .thumb {
-    width: 26px;
-    height: 26px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 700;
-    flex: none;
-  }
-
   .meta {
     min-width: 0;
     flex: 1;
@@ -129,6 +122,13 @@
 
   .mono {
     font-family: var(--mono);
+  }
+
+  .ach {
+    display: flex;
+    align-items: center;
+    color: var(--trophy);
+    flex: none;
   }
 
   .issue-dot {
