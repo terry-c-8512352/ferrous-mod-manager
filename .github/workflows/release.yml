@@ -64,7 +64,7 @@ jobs:
       # Builds the app and uploads the platform bundles (.deb/.rpm/.AppImage on
       # Linux, .msi/.exe on Windows) to a single draft GitHub Release. Each
       # matrix job appends its artifacts to the same release keyed by the tag.
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
