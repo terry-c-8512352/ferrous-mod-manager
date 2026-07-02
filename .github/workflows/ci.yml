@@ -9,12 +9,15 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       # Tauri v2 needs the WebKitGTK/GLib stack at build time. libwebkit2gtk-4.1-dev
       # pulls in gtk3, glib-2.0, gobject-2.0 and soup3.
@@ -28,15 +31,18 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to a commit, so the toolchain must be given explicitly (the
+      # action can no longer infer it from an @stable ref).
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       # The `app` crate's tauri build script requires the frontend bundle
       # (ui/dist) to exist before any cargo build/clippy/test.

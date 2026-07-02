@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keep the SHA-pinned actions in .github/workflows fresh. Dependabot
+  # updates the pinned commit and the trailing version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
