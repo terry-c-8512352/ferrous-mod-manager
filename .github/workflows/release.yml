@@ -45,7 +45,7 @@ jobs:
 
       # Pinned to a commit, so the toolchain must be given explicitly (the
       # action can no longer infer it from an @stable ref).
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
         with:
           toolchain: stable
 
